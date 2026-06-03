@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+.vscode/
+
+node_modules/
+npm-debug.log*
+
+SC.WorkLog.WebApp/client-app/build/
+SC.WorkLog.WebApp/client-app/dist/
+SC.WorkLog.WebApp/client-app/.vite/
+
+*.user
+*.suo

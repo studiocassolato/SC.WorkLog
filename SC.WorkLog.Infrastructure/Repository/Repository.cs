@@ -3,9 +3,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using MongoDB.Driver;
-using SC.WorkLog.Common.Settings;
 using SC.WorkLog.Domain;
 using SC.WorkLog.Domain.Interfaces;
 
@@ -17,14 +15,10 @@ namespace SC.WorkLog.Infrastructure.Repository
         private readonly ILogger<Repository<TEntity>> _logger;
 
         public Repository(
-            IOptions<DbSettings> settings,
-            ILogger<Repository<TEntity>> logger,
-            PrepareDatabase prepareDatabase)
+            IMongoDatabase database,
+            ILogger<Repository<TEntity>> logger)
         {
             _logger = logger;
-
-            var client = new MongoClient(settings.Value.DefaultConnection);
-            var database = client.GetDatabase(settings.Value.Database);
             _collection = database.GetCollection<TEntity>(typeof(TEntity).Name);
         }
 

@@ -33,15 +33,17 @@ import { WorkItemDetailSheet } from 'components/work-item-detail-sheet'
 import { CreateWorkItemDialog } from 'components/create-work-item-dialog'
 import { AddTimeDialog } from 'components/add-time-dialog'
 import { cn } from 'lib/utils'
+import { getWorkItemStatusName, isClosedWorkItemStatus } from 'lib/mock-data'
 
 export default function WorkItemsPage() {
-  const { workItems, projects, customers, employees, timeEntries, role, currentUser } = useWorkLog()
+  const { workItems, projects, customers, employees, timeEntries, statusConfigs, role, currentUser } = useWorkLog()
   const location = useLocation()
   const searchParams = new URLSearchParams(location.search)
   const history = useHistory()
 
   const [search, setSearch] = useState('')
-  const [statusFilters, setStatusFilters] = useState<string[]>(['Open', 'In progress', 'On hold', 'Completed']) // default excludes Closed
+  const initialOpenStatuses = statusConfigs.filter((status) => status.active && !isClosedWorkItemStatus(status.key)).map((status) => status.key)
+  const [statusFilters, setStatusFilters] = useState<string[]>(initialOpenStatuses)
   const [priorityFilter, setPriorityFilter] = useState<string>('all')
   const [customerFilter, setCustomerFilter] = useState<string>('all')
   const [assigneeFilter, setAssigneeFilter] = useState<string>(role === 'Employee' ? 'me' : 'all')
@@ -64,7 +66,7 @@ export default function WorkItemsPage() {
   // Filter work items
   const filteredWorkItems = workItems.filter((item) => {
     if (search && !item.title.toLowerCase().includes(search.toLowerCase()) && !(item.code ?? '').toLowerCase().includes(search.toLowerCase())) return false
-    if (statusFilters.length > 0 && !statusFilters.includes(item.status)) return false
+    if (statusFilters.length > 0 && !statusFilters.includes(item.statusKey)) return false
     if (priorityFilter !== 'all' && item.priority !== priorityFilter) return false
     
     // Assignee filter
@@ -95,7 +97,7 @@ export default function WorkItemsPage() {
     setAddTimeOpen(true)
   }
 
-  const allStatuses = ['Open', 'In progress', 'On hold', 'Completed', 'Closed']
+  const allStatuses = statusConfigs.filter((status) => status.active).sort((a, b) => a.order - b.order).map((status) => status.key)
 
   const toggleStatus = (status: string) => {
     setStatusFilters(prev => 
@@ -121,7 +123,7 @@ export default function WorkItemsPage() {
                   : "bg-background hover:bg-accent border-input"
               )}
             >
-              {status}
+              {getWorkItemStatusName(status)}
             </button>
           ))}
         </div>
@@ -183,7 +185,7 @@ export default function WorkItemsPage() {
         variant="outline"
         className="w-full"
         onClick={() => {
-          setStatusFilters(['Open', 'In progress', 'On hold', 'Completed'])
+          setStatusFilters(initialOpenStatuses)
           setPriorityFilter('all')
           setCustomerFilter('all')
           setAssigneeFilter(role === 'Employee' ? 'me' : 'all')
@@ -205,7 +207,7 @@ export default function WorkItemsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Work Items</h1>
             <p className="text-sm text-muted-foreground">
-              {filteredWorkItems.length} items {statusFilters.length < 5 && `(${statusFilters.join(', ')})`}
+              {filteredWorkItems.length} items {statusFilters.length < allStatuses.length && `(${statusFilters.map(getWorkItemStatusName).join(', ')})`}
             </p>
           </div>
         </div>
@@ -248,7 +250,7 @@ export default function WorkItemsPage() {
                         : "hover:bg-accent"
                     )}
                   >
-                    {status}
+                    {getWorkItemStatusName(status)}
                   </button>
                 ))}
               </div>
@@ -363,7 +365,7 @@ export default function WorkItemsPage() {
                   <TableCell className="text-muted-foreground">{customer?.companyName || '-'}</TableCell>
                   <TableCell className="text-muted-foreground">{project?.name || '-'}</TableCell>
                   <TableCell>
-                    <StatusBadge status={item.status} />
+                    <StatusBadge status={getWorkItemStatusName(item.statusKey)} />
                   </TableCell>
                   <TableCell>
                     <PriorityBadge priority={item.priority} />
@@ -429,7 +431,7 @@ export default function WorkItemsPage() {
                       {customer?.companyName} - {project?.name}
                     </p>
                     <div className="flex items-center gap-2 mt-2">
-                      <StatusBadge status={item.status} />
+                      <StatusBadge status={getWorkItemStatusName(item.statusKey)} />
                       <PriorityBadge priority={item.priority} />
                     </div>
                   </div>

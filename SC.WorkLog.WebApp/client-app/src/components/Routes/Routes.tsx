@@ -1,7 +1,7 @@
 import { Redirect, Route, Switch } from 'react-router-dom'
 import type { ComponentType } from 'react'
 import { AppLayout } from 'components/app-layout'
-import { useWorkLog } from 'lib/worklog-context'
+import { useAuth } from 'helpers/services/AuthContext'
 import Approvals from 'views/Approvals'
 import CustomerReports from 'views/CustomerReports'
 import Dashboard from 'views/Dashboard'
@@ -22,31 +22,33 @@ type AdminRouteProps = {
 }
 
 const AdminRoute = ({ component: Component, ...routeProps }: AdminRouteProps) => {
-  const { role } = useWorkLog()
+  const { isAdmin } = useAuth()
 
   return (
     <Route
       {...routeProps}
-      render={() => (role === 'Admin' ? <Component /> : <Redirect to="/my-day" />)}
+      render={() => (isAdmin ? <Component /> : <Redirect to="/my-day" />)}
     />
   )
 }
 
 const Routes = () => {
+  const { isAdmin } = useAuth()
+
   return (
     <AppLayout>
       <Switch>
         <Route exact path="/">
-          <Redirect to="/dashboard" />
+          <Redirect to={isAdmin ? "/dashboard" : "/my-day"} />
         </Route>
         <AdminRoute exact path="/dashboard" component={Dashboard} />
         <Route exact path="/my-day" component={MyDay} />
-        <Route exact path="/projects" component={Projects} />
-        <Route exact path="/projects/:id" component={ProjectDetail} />
+        <AdminRoute exact path="/projects" component={Projects} />
+        <AdminRoute exact path="/projects/:id" component={ProjectDetail} />
         <Route exact path="/work-items" component={WorkItems} />
         <Route exact path="/work-items/:id" component={WorkItemDetail} />
         <Route exact path="/time-entries" component={TimeEntries} />
-        <Route exact path="/time-completeness" component={TimeCompleteness} />
+        <AdminRoute exact path="/time-completeness" component={TimeCompleteness} />
         <AdminRoute exact path="/approvals" component={Approvals} />
         <AdminRoute exact path="/customer-reports" component={CustomerReports} />
         <AdminRoute exact path="/settings" component={Settings} />

@@ -9,17 +9,15 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="10.0.8" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.2" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.7" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="10.2.1" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SC.WorkLog.Application\SC.WorkLog.Application.csproj" />
     <ProjectReference Include="..\SC.WorkLog.Common\SC.WorkLog.Common.csproj" />
-    <ProjectReference Include="..\SC.WorkLog.Domain\SC.WorkLog.Domain.csproj" />
   </ItemGroup>
 
 </Project>

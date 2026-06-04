@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { cn } from "lib/utils"
 import { useWorkLog } from "lib/worklog-context"
+import { useAuth } from "helpers/services/AuthContext"
 import { Button } from "components/ui/button"
 import {
   Select,
@@ -45,20 +46,29 @@ interface NavItem {
   href: string
   icon: React.ElementType
   adminOnly?: boolean
-  employeeHidden?: boolean
+  employeeOnly?: boolean
 }
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, adminOnly: true },
-  { label: "My Day", href: "/my-day", icon: Calendar },
-  { label: "Projects", href: "/projects", icon: FolderKanban },
-  { label: "Work Items", href: "/work-items", icon: ClipboardList },
-  { label: "Time Entries", href: "/time-entries", icon: Clock },
-  { label: "Time Completeness", href: "/time-completeness", icon: CheckSquare },
+  { label: "My Day", href: "/my-day", icon: Calendar, employeeOnly: true },
+  { label: "Projects", href: "/projects", icon: FolderKanban, adminOnly: true },
+  { label: "Work Items", href: "/work-items", icon: ClipboardList, employeeOnly: true },
+  { label: "Time Entries", href: "/time-entries", icon: Clock, employeeOnly: true },
+  { label: "Time Completeness", href: "/time-completeness", icon: CheckSquare, adminOnly: true },
   { label: "Approvals", href: "/approvals", icon: FileCheck, adminOnly: true },
   { label: "Customer Reports", href: "/customer-reports", icon: FileText, adminOnly: true },
   { label: "Settings", href: "/settings", icon: Settings, adminOnly: true },
+  { label: "User Settings", href: "/user-settings", icon: User, employeeOnly: true },
 ]
+
+function getVisibleNavItems(isAdmin: boolean, isEmployee: boolean) {
+  return navItems.filter((item) => {
+    if (item.adminOnly) return isAdmin
+    if (item.employeeOnly) return isEmployee
+    return true
+  })
+}
 
 function NavLink({ item, collapsed }: { item: NavItem; collapsed?: boolean }) {
   const { pathname } = useLocation()
@@ -83,12 +93,8 @@ function NavLink({ item, collapsed }: { item: NavItem; collapsed?: boolean }) {
 }
 
 export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const { role } = useWorkLog()
-
-  const filteredNavItems = navItems.filter((item) => {
-    if (role === "Employee" && item.adminOnly) return false
-    return true
-  })
+  const { isAdmin, isEmployee } = useAuth()
+  const filteredNavItems = getVisibleNavItems(isAdmin, isEmployee)
 
   return (
     <aside
@@ -133,13 +139,9 @@ export function AppSidebar({ collapsed, onToggle }: { collapsed: boolean; onTogg
 }
 
 export function MobileNav() {
-  const { role } = useWorkLog()
+  const { isAdmin, isEmployee } = useAuth()
   const [open, setOpen] = useState(false)
-
-  const filteredNavItems = navItems.filter((item) => {
-    if (role === "Employee" && item.adminOnly) return false
-    return true
-  })
+  const filteredNavItems = getVisibleNavItems(isAdmin, isEmployee)
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -176,6 +178,19 @@ export function MobileNav() {
 
 export function TopBar({ onAddTime, onAddWorkItem }: { onAddTime: () => void; onAddWorkItem?: () => void }) {
   const { role, setRole, currentUser } = useWorkLog()
+  const { currentUser: backendCurrentUser, displayName, email, isAdmin, signOut } = useAuth()
+  const showDemoRoleSwitcher = import.meta.env.VITE_ENABLE_DEMO_ROLE_SWITCHER !== 'false'
+  const userLabel = displayName || `${currentUser.firstName} ${currentUser.lastName}`
+  const userEmail = email || currentUser.email
+  const backendRole = backendCurrentUser?.role ?? 'Unknown'
+  const backendUserType = backendCurrentUser?.userType ?? 'Unknown'
+  const initials = (userLabel || userEmail || 'WL')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase()
 
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-card px-4 lg:px-6">
@@ -195,7 +210,7 @@ export function TopBar({ onAddTime, onAddWorkItem }: { onAddTime: () => void; on
 
       {/* Right side - actions and user */}
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
-        {onAddWorkItem && (
+        {onAddWorkItem && isAdmin && (
           <Button size="sm" variant="outline" onClick={onAddWorkItem} className="gap-1.5 h-8 px-3 text-sm font-medium">
             <ClipboardList className="h-4 w-4" />
             <span className="hidden sm:inline">Work Item</span>
@@ -207,27 +222,31 @@ export function TopBar({ onAddTime, onAddWorkItem }: { onAddTime: () => void; on
           <span className="hidden sm:inline">Add Time</span>
         </Button>
 
-        <Select value={role} onValueChange={(value) => setRole(value as "Admin" | "Employee")}>
-          <SelectTrigger className="w-24 sm:w-28 h-8 text-xs sm:text-sm border-dashed">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="Admin">Admin</SelectItem>
-            <SelectItem value="Employee">Employee</SelectItem>
-          </SelectContent>
-        </Select>
+        {showDemoRoleSwitcher && (
+          <div className="hidden sm:flex flex-col gap-0.5">
+            <Select value={role} onValueChange={(value) => setRole(value as "Admin" | "Employee")}>
+              <SelectTrigger className="w-28 h-8 text-sm border-dashed">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Admin">Admin</SelectItem>
+                <SelectItem value="Employee">Employee</SelectItem>
+              </SelectContent>
+            </Select>
+            <span className="text-[10px] leading-none text-muted-foreground">Demo UI only</span>
+          </div>
+        )}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-2 pl-2 border-l ml-1 h-8 px-2 hover:bg-accent/30">
               <Avatar className="h-7 w-7">
                 <AvatarFallback className="text-xs bg-primary/10 text-primary font-medium">
-                  {currentUser.firstName[0]}
-                  {currentUser.lastName[0]}
+                  {initials}
                 </AvatarFallback>
               </Avatar>
               <span className="hidden md:block text-sm font-medium">
-                {currentUser.firstName} {currentUser.lastName}
+                {userLabel}
               </span>
               <ChevronDown className="h-3 w-3 text-muted-foreground" />
             </Button>
@@ -235,8 +254,13 @@ export function TopBar({ onAddTime, onAddWorkItem }: { onAddTime: () => void; on
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col space-y-1">
-                <p className="text-sm font-medium">{currentUser.firstName} {currentUser.lastName}</p>
-                <p className="text-xs text-muted-foreground">{currentUser.email}</p>
+                <p className="text-sm font-medium">{userLabel}</p>
+                <p className="text-xs text-muted-foreground">{userEmail}</p>
+                <p className="text-xs text-muted-foreground">Role: {backendRole}</p>
+                <p className="text-xs text-muted-foreground">User type: {backendUserType}</p>
+                {showDemoRoleSwitcher && (
+                  <p className="text-xs text-muted-foreground">Demo UI role: {role}</p>
+                )}
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
@@ -247,7 +271,10 @@ export function TopBar({ onAddTime, onAddWorkItem }: { onAddTime: () => void; on
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive focus:text-destructive">
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onSelect={() => void signOut()}
+            >
               <LogOut className="mr-2 h-4 w-4" />
               Logout
             </DropdownMenuItem>
@@ -260,16 +287,20 @@ export function TopBar({ onAddTime, onAddWorkItem }: { onAddTime: () => void; on
 
 export function MobileBottomNav() {
   const { pathname } = useLocation()
-  const { role } = useWorkLog()
+  const { isAdmin, isEmployee } = useAuth()
 
   const mobileNavItems = [
-    { label: "My Day", href: "/my-day", icon: Calendar },
-    { label: "Work Items", href: "/work-items", icon: ClipboardList },
-    { label: "Time", href: "/time-entries", icon: Clock },
-    ...(role === "Admin"
+    ...(isEmployee
+      ? [
+          { label: "My Day", href: "/my-day", icon: Calendar },
+          { label: "Work Items", href: "/work-items", icon: ClipboardList },
+          { label: "Time", href: "/time-entries", icon: Clock },
+        ]
+      : []),
+    ...(isAdmin
       ? [{ label: "Dashboard", href: "/dashboard", icon: LayoutDashboard }]
       : []),
-    { label: "More", href: role === "Admin" ? "/settings" : "/user-settings", icon: Settings },
+    { label: "More", href: isAdmin ? "/settings" : "/user-settings", icon: Settings },
   ].slice(0, 5)
 
   return (

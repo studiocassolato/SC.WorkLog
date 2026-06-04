@@ -18,6 +18,7 @@ import {
 import { StatusBadge, PriorityBadge } from 'components/status-badges'
 import { Separator } from 'components/ui/separator'
 import { Clock, ExternalLink, User, Calendar, Building2, FolderKanban } from 'lucide-react'
+import { getWorkItemStatusName } from 'lib/mock-data'
 
 interface WorkItemDetailSheetProps {
   workItemId: string | null
@@ -72,7 +73,7 @@ export function WorkItemDetailSheet({
         <div className="mt-6 space-y-6">
           {/* Status and Priority */}
           <div className="flex items-center gap-2">
-            <StatusBadge status={workItem.status} />
+            <StatusBadge status={getWorkItemStatusName(workItem.statusKey)} />
             <PriorityBadge priority={workItem.priority} />
           </div>
 

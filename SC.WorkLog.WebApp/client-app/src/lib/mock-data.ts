@@ -3,17 +3,19 @@
 export type EmployeeLevel = 'Junior' | 'Mid' | 'Senior'
 export type PaymentType = 'Time & material' | 'Fixed price' | 'Annual retainer' | 'Internal'
 export type ProjectStatus = 'Active' | 'Suspended' | 'Closed'
-export type WorkItemStatus = 'Open' | 'In progress' | 'On hold' | 'Completed' | 'Closed'
+export type WorkItemStatusTypology = 'New' | 'InProgress' | 'WaitingInternal' | 'WaitingCustomer' | 'Closed' | 'Archived'
+export type WorkItemStatus = string
 export type WorkItemPriority = 'Low' | 'Normal' | 'High' | 'Urgent'
 export type RequestStatus = 'Pending approval' | 'Approved' | 'Rejected'
 export type LeaveType = 'Vacation' | 'Permission'
 
 export interface StatusConfig {
   id: string
+  key: WorkItemStatus
   name: WorkItemStatus
-  displayName: string // name shown to customers
-  isClosed: boolean
-  isInitial: boolean
+  typology: WorkItemStatusTypology
+  customerDisplayName: string
+  active: boolean
   order: number
 }
 
@@ -93,7 +95,7 @@ export interface WorkItem {
   projectId: string
   title: string
   description: string
-  status: WorkItemStatus
+  statusKey: WorkItemStatus
   priority: WorkItemPriority
   assigneeId: string | null
   origin: 'Manual' | 'Jira' | 'Azure DevOps' | 'Email'
@@ -206,12 +208,25 @@ export const employees: Employee[] = [
 
 // Mock Status Configuration
 export const statusConfigs: StatusConfig[] = [
-  { id: 'status-1', name: 'Open', displayName: 'New', isClosed: false, isInitial: true, order: 1 },
-  { id: 'status-2', name: 'In progress', displayName: 'In Progress', isClosed: false, isInitial: false, order: 2 },
-  { id: 'status-3', name: 'On hold', displayName: 'On Hold', isClosed: false, isInitial: false, order: 3 },
-  { id: 'status-4', name: 'Completed', displayName: 'Completed', isClosed: true, isInitial: false, order: 4 },
-  { id: 'status-5', name: 'Closed', displayName: 'Closed', isClosed: true, isInitial: false, order: 5 },
+  { id: 'status-1', key: 'new', name: 'New', typology: 'New', customerDisplayName: 'New', active: true, order: 10 },
+  { id: 'status-2', key: 'in-progress', name: 'In progress', typology: 'InProgress', customerDisplayName: 'In progress', active: true, order: 20 },
+  { id: 'status-3', key: 'code-review', name: 'Code review', typology: 'InProgress', customerDisplayName: 'In progress', active: true, order: 30 },
+  { id: 'status-4', key: 'under-analysis', name: 'Under analysis', typology: 'WaitingInternal', customerDisplayName: 'In progress', active: true, order: 40 },
+  { id: 'status-5', key: 'waiting-for-customer', name: 'Waiting for customer', typology: 'WaitingCustomer', customerDisplayName: 'Waiting for customer', active: true, order: 50 },
+  { id: 'status-6', key: 'closed', name: 'Closed', typology: 'Closed', customerDisplayName: 'Closed', active: true, order: 90 },
+  { id: 'status-7', key: 'happy-customer', name: 'Happy customer', typology: 'Archived', customerDisplayName: 'Happy customer', active: true, order: 100 },
 ]
+
+export const getWorkItemStatusConfig = (statusKey: WorkItemStatus) =>
+  statusConfigs.find((item) => item.key === statusKey)
+
+export const getWorkItemStatusName = (statusKey: WorkItemStatus) =>
+  getWorkItemStatusConfig(statusKey)?.name ?? statusKey
+
+export const isClosedWorkItemStatus = (statusKey: WorkItemStatus) => {
+  const config = getWorkItemStatusConfig(statusKey)
+  return config?.typology === 'Closed' || config?.typology === 'Archived'
+}
 
 // Mock Customers
 export const customers: Customer[] = [
@@ -408,7 +423,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-1',
     title: 'Product import error analysis',
     description: 'Investigate and fix product import failures from external sources',
-    status: 'In progress',
+    statusKey: 'in-progress',
     priority: 'High',
     assigneeId: 'emp-1',
     origin: 'Jira',
@@ -423,7 +438,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-1',
     title: 'Magento attribute migration',
     description: 'Migrate product attributes to new Magento structure',
-    status: 'Open',
+    statusKey: 'new',
     priority: 'Normal',
     assigneeId: 'emp-2',
     origin: 'Manual',
@@ -437,7 +452,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-1',
     title: 'Product Health dashboard configuration',
     description: 'Configure and customize the product health monitoring dashboard',
-    status: 'In progress',
+    statusKey: 'in-progress',
     priority: 'Normal',
     assigneeId: 'emp-3',
     origin: 'Manual',
@@ -451,7 +466,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-2',
     title: 'Image synchronization bug',
     description: 'Fix image sync issues between PIM and e-commerce platform',
-    status: 'Open',
+    statusKey: 'new',
     priority: 'Urgent',
     assigneeId: null,
     origin: 'Email',
@@ -465,7 +480,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-2',
     title: 'Staging environment setup',
     description: 'Set up and configure staging environment for testing',
-    status: 'Completed',
+    statusKey: 'closed',
     priority: 'Normal',
     assigneeId: 'emp-4',
     origin: 'Manual',
@@ -479,7 +494,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-3',
     title: 'Project progress meeting',
     description: 'Weekly sync meeting with Videndum team',
-    status: 'Open',
+    statusKey: 'new',
     priority: 'Low',
     assigneeId: 'emp-1',
     origin: 'Manual',
@@ -493,7 +508,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-4',
     title: 'Internal AI Optimize training',
     description: 'Team training session on AI optimization tools',
-    status: 'In progress',
+    statusKey: 'in-progress',
     priority: 'Normal',
     assigneeId: 'emp-1',
     origin: 'Manual',
@@ -508,7 +523,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-1',
     title: 'MongoDB performance review',
     description: 'Review and optimize MongoDB queries for better performance',
-    status: 'On hold',
+    statusKey: 'waiting-for-customer',
     priority: 'Normal',
     assigneeId: 'emp-5',
     origin: 'Jira',
@@ -522,7 +537,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-3',
     title: 'Generic customer support',
     description: 'General support requests and troubleshooting',
-    status: 'Open',
+    statusKey: 'new',
     priority: 'Normal',
     assigneeId: null,
     origin: 'Manual',
@@ -536,7 +551,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-2',
     title: 'Production release testing',
     description: 'Final testing before production deployment',
-    status: 'In progress',
+    statusKey: 'in-progress',
     priority: 'High',
     assigneeId: 'emp-2',
     origin: 'Manual',
@@ -550,7 +565,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-5',
     title: 'Homepage redesign',
     description: 'Complete redesign of the homepage layout',
-    status: 'Closed',
+    statusKey: 'closed',
     priority: 'Normal',
     assigneeId: 'emp-3',
     origin: 'Manual',
@@ -564,7 +579,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-4',
     title: 'Time entry validation',
     description: 'Implement validation rules for time entries',
-    status: 'Open',
+    statusKey: 'new',
     priority: 'Normal',
     assigneeId: 'emp-4',
     origin: 'Manual',
@@ -578,7 +593,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-1',
     title: 'API rate limiting implementation',
     description: 'Implement rate limiting for external API calls',
-    status: 'Open',
+    statusKey: 'new',
     priority: 'Low',
     assigneeId: null,
     origin: 'Jira',
@@ -592,7 +607,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-4',
     title: 'Dashboard analytics',
     description: 'Build analytics dashboard with KPIs',
-    status: 'In progress',
+    statusKey: 'in-progress',
     priority: 'High',
     assigneeId: 'emp-1',
     origin: 'Manual',
@@ -606,7 +621,7 @@ export const workItems: WorkItem[] = [
     projectId: 'proj-3',
     title: 'Documentation update',
     description: 'Update technical documentation for client',
-    status: 'Open',
+    statusKey: 'new',
     priority: 'Low',
     assigneeId: 'emp-5',
     origin: 'Manual',

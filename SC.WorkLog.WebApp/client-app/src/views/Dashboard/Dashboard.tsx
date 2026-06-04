@@ -16,6 +16,7 @@ import {
   LayoutDashboard,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import { isClosedWorkItemStatus } from 'lib/mock-data'
 
 type Period = 'today' | 'week' | 'month'
 
@@ -100,7 +101,7 @@ export default function DashboardPage() {
 
   // Unassigned work items
   const unassignedWorkItems = workItems.filter(
-    (w) => !w.assigneeId && w.status !== 'Closed' && w.status !== 'Completed'
+    (w) => !w.assigneeId && !isClosedWorkItemStatus(w.statusKey)
   )
 
   // Hours by customer

@@ -1,5 +1,28 @@
-import { useState } from "react"
-import { useWorkLog } from "lib/worklog-context"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useAuth } from "helpers/services/AuthContext"
+import {
+  createCustomer,
+  createEmployee,
+  createStatusConfig,
+  createWorkLogUser,
+  ensureDefaultStatuses,
+  findWorkLogUserByEmployeeId,
+  findWorkLogUsersByCustomerId,
+  getCustomers,
+  getEmployees,
+  getWorkLogUsers,
+  updateCustomer,
+  updateEmployee,
+  updateStatusConfig,
+  updateWorkLogUser,
+  type CustomerDto,
+  type EmployeeDto,
+  type EmployeeLevel,
+  type StatusConfigDto,
+  type WorkItemStatusTypology,
+  type WorkLogUserDto,
+  type WorkLogUserRole,
+} from "helpers/services/worklog-api"
 import { Button } from "components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "components/ui/card"
 import { Input } from "components/ui/input"
@@ -30,46 +53,121 @@ import {
   DialogTitle,
 } from "components/ui/dialog"
 import { Badge } from "components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "components/ui/alert"
 import { toast } from "sonner"
 import { 
   Building2,
   Users,
-  Calendar,
   Search,
   Plus,
   Pencil,
-  Settings
+  Settings,
+  ShieldAlert,
 } from "lucide-react"
 
+const fullName = (employee: Pick<EmployeeDto, "firstName" | "lastName">) =>
+  `${employee.firstName} ${employee.lastName}`.trim()
+
+const nullableText = (value: FormDataEntryValue | null) => {
+  const text = value?.toString().trim() ?? ""
+  return text || null
+}
+
+const stringValue = (value: FormDataEntryValue | null) => value?.toString().trim() ?? ""
+
+const getErrorMessage = (error: unknown) => {
+  const responseData = typeof error === 'object' && error && 'response' in error
+    ? (error as { response?: { data?: unknown } }).response?.data
+    : null
+  const errors = responseData && typeof responseData === 'object'
+    ? ((responseData as { errors?: unknown; Errors?: unknown }).errors ?? (responseData as { errors?: unknown; Errors?: unknown }).Errors)
+    : null
+  if (Array.isArray(errors) && errors.every((item) => typeof item === 'string')) return errors.join(' ')
+  if (error instanceof Error && error.message) return error.message
+  return "Unexpected error. Please try again."
+}
+
+const statusTypologyOptions: Array<{ value: WorkItemStatusTypology; label: string }> = [
+  { value: "New", label: "New" },
+  { value: "InProgress", label: "In progress" },
+  { value: "WaitingInternal", label: "Waiting internal" },
+  { value: "WaitingCustomer", label: "Waiting customer" },
+  { value: "Closed", label: "Closed" },
+  { value: "Archived", label: "Archived" },
+]
+
+const statusTypologyLabel = (typology: WorkItemStatusTypology) =>
+  statusTypologyOptions.find((option) => option.value === typology)?.label ?? typology
+
+const toStatusKey = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
 export default function SettingsPage() {
-  const { 
-    customers, 
-    employees,
-    statusConfigs,
-    addCustomer,
-    updateCustomer,
-    addEmployee,
-    updateEmployee,
-    role 
-  } = useWorkLog()
+  const { isAdmin } = useAuth()
   
-  const [activeTab, setActiveTab] = useState("company")
+  const [activeTab, setActiveTab] = useState("statuses")
+  const [statusConfigs, setStatusConfigs] = useState<StatusConfigDto[]>([])
+  const [employees, setEmployees] = useState<EmployeeDto[]>([])
+  const [customers, setCustomers] = useState<CustomerDto[]>([])
+  const [workLogUsers, setWorkLogUsers] = useState<WorkLogUserDto[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
   
   // Customer state
   const [customerSearch, setCustomerSearch] = useState("")
   const [customerStatusFilter, setCustomerStatusFilter] = useState("all")
-  const [editingCustomer, setEditingCustomer] = useState<typeof customers[0] | null>(null)
+  const [editingCustomer, setEditingCustomer] = useState<CustomerDto | null>(null)
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = useState(false)
   
   // Employee state
   const [employeeSearch, setEmployeeSearch] = useState("")
   const [employeeLevelFilter, setEmployeeLevelFilter] = useState("all")
   const [employeeStatusFilter, setEmployeeStatusFilter] = useState("all")
-  const [editingEmployee, setEditingEmployee] = useState<typeof employees[0] | null>(null)
+  const [editingEmployee, setEditingEmployee] = useState<EmployeeDto | null>(null)
   const [isEmployeeDialogOpen, setIsEmployeeDialogOpen] = useState(false)
 
+  // Status state
+  const [editingStatus, setEditingStatus] = useState<StatusConfigDto | null>(null)
+  const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
+
+  const loadSettingsData = useCallback(async () => {
+    setIsLoading(true)
+    setLoadError(null)
+    try {
+      const [employeesResponse, customersResponse, statusesResponse] = await Promise.all([
+        getEmployees(),
+        getCustomers(),
+        ensureDefaultStatuses(),
+      ])
+      const linkedUserResponses = await Promise.all([
+        ...employeesResponse.map((employee) => getWorkLogUsers({ userType: "Employee", employeeId: employee.id })),
+        ...customersResponse.map((customer) => getWorkLogUsers({ userType: "Customer", customerId: customer.id })),
+      ])
+      setStatusConfigs(statusesResponse)
+      setEmployees(employeesResponse)
+      setCustomers(customersResponse)
+      setWorkLogUsers(linkedUserResponses.flat())
+    } catch (error) {
+      setLoadError(getErrorMessage(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    void loadSettingsData()
+  }, [isAdmin, loadSettingsData])
+
+  const statusRows = useMemo(() => [...statusConfigs].sort((a, b) => a.order - b.order), [statusConfigs])
+
   // Redirect if not admin
-  if (role !== "Admin") {
+  if (!isAdmin) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
@@ -79,6 +177,14 @@ export default function SettingsPage() {
       </div>
     )
   }
+
+  const employeeAccessUser = editingEmployee
+    ? findWorkLogUserByEmployeeId(workLogUsers, editingEmployee.id)
+    : null
+  const customerPortalUsers = editingCustomer
+    ? findWorkLogUsersByCustomerId(workLogUsers, editingCustomer.id)
+    : []
+  const primaryCustomerPortalUser = customerPortalUsers[0] ?? null
 
   // Filter customers
   const filteredCustomers = customers.filter((customer) => {
@@ -101,47 +207,175 @@ export default function SettingsPage() {
     return matchesSearch && matchesLevel && matchesStatus
   })
 
-  const handleSaveCustomer = (formData: FormData) => {
-    const customerData = {
-      companyName: formData.get("companyName") as string,
-      companyDomain: formData.get("companyDomain") as string || undefined,
-      contactPerson: formData.get("contactPerson") as string,
-      contactEmail: formData.get("contactEmail") as string,
-      contactPhone: formData.get("contactPhone") as string,
+  const handleSaveStatus = async (formData: FormData) => {
+    const statusData = {
+      name: stringValue(formData.get("name")),
+      typology: formData.get("typology") as WorkItemStatusTypology,
+      customerDisplayName: stringValue(formData.get("customerDisplayName")),
+      order: parseInt(formData.get("order") as string, 10) || 0,
       active: formData.get("active") === "true",
     }
-    
-    if (editingCustomer) {
-      updateCustomer(editingCustomer.id, customerData)
-      toast.success("Customer updated successfully")
-    } else {
-      addCustomer(customerData)
-      toast.success("Customer created successfully")
+    const statusKey = stringValue(formData.get("key"))
+
+    setIsSaving(true)
+    try {
+      if (editingStatus) {
+        await updateStatusConfig({ id: editingStatus.id, ...statusData })
+      } else {
+        await createStatusConfig({ key: statusKey || toStatusKey(statusData.name), ...statusData })
+      }
+
+      await loadSettingsData()
+      toast.success(editingStatus ? "Status updated successfully" : "Status created successfully")
+      setIsStatusDialogOpen(false)
+      setEditingStatus(null)
+    } catch (error) {
+      toast.error(getErrorMessage(error))
+    } finally {
+      setIsSaving(false)
     }
-    setIsCustomerDialogOpen(false)
-    setEditingCustomer(null)
   }
 
-  const handleSaveEmployee = (formData: FormData) => {
+  const handleSaveCustomer = async (formData: FormData) => {
+    const customerData = {
+      companyName: stringValue(formData.get("companyName")),
+      companyDomain: nullableText(formData.get("companyDomain")),
+      contactPerson: stringValue(formData.get("contactPerson")),
+      contactEmail: stringValue(formData.get("contactEmail")),
+      contactPhone: nullableText(formData.get("contactPhone")),
+      active: formData.get("active") === "true",
+    }
+
+    const enablePortalUser = formData.get("enablePortalUser") === "true"
+    const portalUserActive = formData.get("portalUserActive") === "true"
+    const portalUserEmail = stringValue(formData.get("portalUserEmail"))
+    const portalUserDisplayName = stringValue(formData.get("portalUserDisplayName"))
+    const portalUserCognitoSub = nullableText(formData.get("portalUserCognitoSub"))
+    const existingPortalUser = editingCustomer ? primaryCustomerPortalUser : null
+
+    setIsSaving(true)
+    try {
+      const savedCustomer = editingCustomer
+        ? await updateCustomer({ id: editingCustomer.id, ...customerData })
+        : await createCustomer(customerData)
+
+      try {
+        if (enablePortalUser) {
+          const request = {
+            email: portalUserEmail,
+            cognitoSub: portalUserCognitoSub,
+            userType: "Customer" as const,
+            role: "Customer" as const,
+            employeeId: null,
+            customerId: savedCustomer.id,
+            displayName: portalUserDisplayName || savedCustomer.contactPerson,
+            active: portalUserActive,
+          }
+
+          if (existingPortalUser) {
+            await updateWorkLogUser({ id: existingPortalUser.id, ...request })
+          } else {
+            await createWorkLogUser(request)
+          }
+        } else if (existingPortalUser) {
+          await updateWorkLogUser({
+            id: existingPortalUser.id,
+            email: existingPortalUser.email,
+            cognitoSub: existingPortalUser.cognitoSub,
+            userType: "Customer",
+            role: "Customer",
+            employeeId: null,
+            customerId: savedCustomer.id,
+            displayName: existingPortalUser.displayName,
+            active: false,
+          })
+        }
+      } catch (error) {
+        await loadSettingsData()
+        toast.error(`Customer saved, but portal user configuration failed: ${getErrorMessage(error)}`)
+        return
+      }
+
+      await loadSettingsData()
+      toast.success(editingCustomer ? "Customer updated successfully" : "Customer created successfully")
+      setIsCustomerDialogOpen(false)
+      setEditingCustomer(null)
+    } catch (error) {
+      toast.error(getErrorMessage(error))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSaveEmployee = async (formData: FormData) => {
     const employeeData = {
-      firstName: formData.get("firstName") as string,
-      lastName: formData.get("lastName") as string,
-      email: formData.get("email") as string,
-      level: formData.get("level") as "Junior" | "Mid" | "Senior",
+      firstName: stringValue(formData.get("firstName")),
+      lastName: stringValue(formData.get("lastName")),
+      email: stringValue(formData.get("email")),
+      level: formData.get("level") as EmployeeLevel,
       defaultHourlyRate: parseFloat(formData.get("defaultHourlyRate") as string) || 0,
       expectedDailyHours: parseFloat(formData.get("expectedDailyHours") as string) || 8,
       active: formData.get("active") === "true",
     }
-    
-    if (editingEmployee) {
-      updateEmployee(editingEmployee.id, employeeData)
-      toast.success("Employee updated successfully")
-    } else {
-      addEmployee(employeeData)
-      toast.success("Employee created successfully")
+
+    const enableLogin = formData.get("enableLogin") === "true"
+    const accessRole = formData.get("accessRole") as Extract<WorkLogUserRole, "Admin" | "Employee">
+    const accessActive = formData.get("accessActive") === "true"
+    const cognitoSub = nullableText(formData.get("cognitoSub"))
+    const existingUser = editingEmployee ? employeeAccessUser : null
+
+    setIsSaving(true)
+    try {
+      const savedEmployee = editingEmployee
+        ? await updateEmployee({ id: editingEmployee.id, ...employeeData })
+        : await createEmployee(employeeData)
+
+      try {
+        if (enableLogin) {
+          const request = {
+            email: savedEmployee.email,
+            cognitoSub,
+            userType: "Employee" as const,
+            role: accessRole,
+            employeeId: savedEmployee.id,
+            customerId: null,
+            displayName: fullName(savedEmployee),
+            active: accessActive,
+          }
+
+          if (existingUser) {
+            await updateWorkLogUser({ id: existingUser.id, ...request })
+          } else {
+            await createWorkLogUser(request)
+          }
+        } else if (existingUser) {
+          await updateWorkLogUser({
+            id: existingUser.id,
+            email: savedEmployee.email,
+            cognitoSub: existingUser.cognitoSub,
+            userType: "Employee",
+            role: existingUser.role === "Admin" ? "Admin" : "Employee",
+            employeeId: savedEmployee.id,
+            customerId: null,
+            displayName: fullName(savedEmployee),
+            active: false,
+          })
+        }
+      } catch (error) {
+        await loadSettingsData()
+        toast.error(`Employee saved, but application access configuration failed: ${getErrorMessage(error)}`)
+        return
+      }
+
+      await loadSettingsData()
+      toast.success(editingEmployee ? "Employee updated successfully" : "Employee created successfully")
+      setIsEmployeeDialogOpen(false)
+      setEditingEmployee(null)
+    } catch (error) {
+      toast.error(getErrorMessage(error))
+    } finally {
+      setIsSaving(false)
     }
-    setIsEmployeeDialogOpen(false)
-    setEditingEmployee(null)
   }
 
   return (
@@ -153,17 +387,21 @@ export default function SettingsPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            {customers.length} customers, {employees.filter(e => e.active).length} active employees
+            {isLoading ? "Loading settings..." : `${customers.length} customers, ${employees.filter(e => e.active).length} active employees`}
           </p>
         </div>
       </div>
 
+      {loadError && (
+        <Alert variant="destructive">
+          <ShieldAlert className="h-4 w-4" />
+          <AlertTitle>Unable to load Settings data</AlertTitle>
+          <AlertDescription>{loadError}</AlertDescription>
+        </Alert>
+      )}
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full max-w-[500px] grid-cols-4">
-          <TabsTrigger value="company">
-            <Building2 className="mr-2 h-4 w-4" />
-            Company
-          </TabsTrigger>
+        <TabsList className="grid w-full max-w-[420px] grid-cols-3">
           <TabsTrigger value="statuses">
             Statuses
           </TabsTrigger>
@@ -177,134 +415,56 @@ export default function SettingsPage() {
           </TabsTrigger>
         </TabsList>
 
-        {/* Company Tab */}
-        <TabsContent value="company">
-          <div className="grid gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Company Information</CardTitle>
-                <CardDescription>Basic company details and branding</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="companyName">Company Name</Label>
-                    <Input id="companyName" defaultValue="SC Company" />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="companyEmail">Company Email</Label>
-                    <Input id="companyEmail" type="email" defaultValue="info@sccompany.com" />
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <Button onClick={() => toast.success("Company info saved")}>Save Changes</Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="h-5 w-5" />
-                  Time Tracking Policies
-                </CardTitle>
-                <CardDescription>Configure company-wide time tracking rules</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-6 md:grid-cols-2">
-                  <div className="space-y-4">
-                    <h3 className="font-medium">Work Schedule</h3>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Standard Work Hours</span>
-                        <span>8 hours/day</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Work Days</span>
-                        <span>Monday - Friday</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Time Entry Approval</span>
-                        <span>Required</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <h3 className="font-medium">Leave Policies</h3>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Annual Leave</span>
-                        <span>20 days/year</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Sick Leave</span>
-                        <span>10 days/year</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Leave Approval</span>
-                        <span>Manager required</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-4">
-                  <h3 className="font-medium">Fiscal Year</h3>
-                  <div className="flex items-center gap-4">
-                    <Calendar className="h-10 w-10 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium">January 1 - December 31</p>
-                      <p className="text-sm text-muted-foreground">Current fiscal year: 2024</p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
         {/* Statuses Tab */}
         <TabsContent value="statuses">
           <Card>
             <CardHeader>
               <CardTitle>Work Item Statuses</CardTitle>
-              <CardDescription>Configure status options for work items. Statuses marked as &quot;closed&quot; indicate completed work items.</CardDescription>
+              <CardDescription>
+                Configure free workflow statuses. The first active status with typology New is used as the default initial status.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Internal Name</TableHead>
-                    <TableHead>Customer Display Name</TableHead>
-                    <TableHead>Is Closed</TableHead>
-                    <TableHead>Is Initial</TableHead>
+                    <TableHead>Key</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Typology</TableHead>
+                    <TableHead>Customer display name</TableHead>
+                    <TableHead>Closed</TableHead>
+                    <TableHead>Active</TableHead>
+                    <TableHead className="text-right">Order</TableHead>
                     <TableHead className="w-12"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {statusConfigs.sort((a, b) => a.order - b.order).map((status) => (
+                  {statusRows.map((status) => (
                     <TableRow key={status.id}>
+                      <TableCell className="font-mono text-xs">{status.key}</TableCell>
                       <TableCell className="font-medium">{status.name}</TableCell>
-                      <TableCell>{status.displayName}</TableCell>
+                      <TableCell>{statusTypologyLabel(status.typology)}</TableCell>
+                      <TableCell>{status.customerDisplayName}</TableCell>
                       <TableCell>
                         {status.isClosed ? (
                           <Badge variant="secondary">Closed</Badge>
                         ) : (
-                          <span className="text-muted-foreground">-</span>
+                          <Badge variant="outline">Open</Badge>
                         )}
                       </TableCell>
                       <TableCell>
-                        {status.isInitial ? (
-                          <Badge>Default</Badge>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
+                        <Badge variant={status.active ? "default" : "secondary"}>
+                          {status.active ? "Active" : "Inactive"}
+                        </Badge>
                       </TableCell>
+                      <TableCell className="text-right">{status.order}</TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => { setEditingStatus(status); setIsStatusDialogOpen(true); }}
+                        >
                           <Pencil className="h-4 w-4" />
                         </Button>
                       </TableCell>
@@ -313,7 +473,7 @@ export default function SettingsPage() {
                 </TableBody>
               </Table>
               <div className="mt-4 flex justify-end">
-                <Button variant="outline" onClick={() => toast.info("Status management coming soon")}>
+                <Button variant="outline" onClick={() => { setEditingStatus(null); setIsStatusDialogOpen(true); }}>
                   <Plus className="mr-2 h-4 w-4" />
                   Add Status
                 </Button>
@@ -387,6 +547,9 @@ export default function SettingsPage() {
                           <Badge variant={customer.active ? "default" : "secondary"}>
                             {customer.active ? "Active" : "Inactive"}
                           </Badge>
+                          {findWorkLogUsersByCustomerId(workLogUsers, customer.id).some((user) => user.active) && (
+                            <Badge variant="outline" className="ml-2">Portal user</Badge>
+                          )}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
@@ -464,6 +627,7 @@ export default function SettingsPage() {
                     <TableHead>Level</TableHead>
                     <TableHead className="text-right">Hourly Rate</TableHead>
                     <TableHead className="text-right">Daily Hours</TableHead>
+                    <TableHead>Application Access</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
@@ -471,7 +635,7 @@ export default function SettingsPage() {
                 <TableBody>
                   {filteredEmployees.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         No employees found
                       </TableCell>
                     </TableRow>
@@ -487,6 +651,21 @@ export default function SettingsPage() {
                         </TableCell>
                         <TableCell className="text-right">${employee.defaultHourlyRate}/h</TableCell>
                         <TableCell className="text-right">{employee.expectedDailyHours}h</TableCell>
+                        <TableCell>
+                          {(() => {
+                            const accessUser = findWorkLogUserByEmployeeId(workLogUsers, employee.id)
+                            if (!accessUser) return <Badge variant="secondary">No login</Badge>
+
+                            return (
+                              <div className="flex flex-wrap gap-1">
+                                <Badge variant={accessUser.active ? "default" : "secondary"}>
+                                  {accessUser.active ? "Login enabled" : "Login inactive"}
+                                </Badge>
+                                <Badge variant="outline">{accessUser.role}</Badge>
+                              </div>
+                            )
+                          })()}
+                        </TableCell>
                         <TableCell>
                           <Badge variant={employee.active ? "default" : "secondary"}>
                             {employee.active ? "Active" : "Inactive"}
@@ -514,9 +693,110 @@ export default function SettingsPage() {
         </TabsContent>
       </Tabs>
 
+      {/* Status Dialog */}
+      <Dialog open={isStatusDialogOpen} onOpenChange={setIsStatusDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingStatus ? "Edit Status" : "Add Status"}</DialogTitle>
+            <DialogDescription>
+              Status typology provides the business meaning. Closed/Open behavior is derived from typology.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            key={editingStatus?.id ?? "new-status"}
+            onSubmit={(event) => {
+              event.preventDefault()
+              void handleSaveStatus(new FormData(event.currentTarget))
+            }}
+            className="space-y-4"
+          >
+            <div className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="statusKey">Key</Label>
+                <Input
+                  id="statusKey"
+                  name="key"
+                  defaultValue={editingStatus?.key || ""}
+                  placeholder="e.g., code-review"
+                  readOnly={Boolean(editingStatus)}
+                  required={!editingStatus}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Stable lowercase kebab-case key. It cannot be changed after creation.
+                </p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="statusName">Name</Label>
+                <Input id="statusName" name="name" defaultValue={editingStatus?.name || ""} required />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="statusTypology">Typology</Label>
+                <Select name="typology" defaultValue={editingStatus?.typology || "New"}>
+                  <SelectTrigger id="statusTypology">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statusTypologyOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="customerDisplayName">Customer display name</Label>
+                <Input
+                  id="customerDisplayName"
+                  name="customerDisplayName"
+                  defaultValue={editingStatus?.customerDisplayName || ""}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Use this to hide internal statuses from customers, for example Code review as In progress.
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="grid gap-2">
+                  <Label htmlFor="statusOrder">Order</Label>
+                  <Input
+                    id="statusOrder"
+                    name="order"
+                    type="number"
+                    min="0"
+                    defaultValue={editingStatus?.order ?? 10}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="statusActive">Active</Label>
+                  <Select name="active" defaultValue={editingStatus?.active !== false ? "true" : "false"}>
+                    <SelectTrigger id="statusActive">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="true">Active</SelectItem>
+                      <SelectItem value="false">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setIsStatusDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSaving}>
+                {editingStatus ? "Save Changes" : "Add Status"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* Customer Dialog */}
       <Dialog open={isCustomerDialogOpen} onOpenChange={setIsCustomerDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingCustomer ? "Edit Customer" : "Add Customer"}</DialogTitle>
             <DialogDescription>
@@ -524,9 +804,10 @@ export default function SettingsPage() {
             </DialogDescription>
           </DialogHeader>
           <form
+            key={`${editingCustomer?.id ?? "new"}-${primaryCustomerPortalUser?.id ?? "no-portal-user"}`}
             onSubmit={(event) => {
               event.preventDefault()
-              handleSaveCustomer(new FormData(event.currentTarget))
+              void handleSaveCustomer(new FormData(event.currentTarget))
             }}
             className="space-y-4"
           >
@@ -564,12 +845,77 @@ export default function SettingsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <Separator />
+              <div className="space-y-4 rounded-md border p-4">
+                <div>
+                  <h3 className="font-medium">Portal users</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Customer portal access is prepared but not enabled yet.
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="enablePortalUser">Main contact portal user</Label>
+                  <Select name="enablePortalUser" defaultValue={primaryCustomerPortalUser ? "true" : "false"}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="true">Create/update portal user</SelectItem>
+                      <SelectItem value="false">Do not create / deactivate portal user</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="portalUserEmail">Portal user email</Label>
+                  <Input
+                    id="portalUserEmail"
+                    name="portalUserEmail"
+                    type="email"
+                    defaultValue={primaryCustomerPortalUser?.email || editingCustomer?.contactEmail || ""}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="portalUserDisplayName">Portal user display name</Label>
+                  <Input
+                    id="portalUserDisplayName"
+                    name="portalUserDisplayName"
+                    defaultValue={primaryCustomerPortalUser?.displayName || editingCustomer?.contactPerson || ""}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="portalUserCognitoSub">CognitoSub (advanced)</Label>
+                  <Input
+                    id="portalUserCognitoSub"
+                    name="portalUserCognitoSub"
+                    defaultValue={primaryCustomerPortalUser?.cognitoSub || ""}
+                    placeholder="Optional Cognito subject"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="portalUserActive">Portal user status</Label>
+                  <Select name="portalUserActive" defaultValue={primaryCustomerPortalUser?.active !== false ? "true" : "false"}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="true">Active</SelectItem>
+                      <SelectItem value="false">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {customerPortalUsers.length > 1 && (
+                  <p className="text-xs text-muted-foreground">
+                    {customerPortalUsers.length} portal users exist for this customer. This form updates the first one for now.
+                  </p>
+                )}
+                <Badge variant="secondary">Customer portal not enabled</Badge>
+              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsCustomerDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit">
+              <Button type="submit" disabled={isSaving}>
                 {editingCustomer ? "Save Changes" : "Add Customer"}
               </Button>
             </DialogFooter>
@@ -579,7 +925,7 @@ export default function SettingsPage() {
 
       {/* Employee Dialog */}
       <Dialog open={isEmployeeDialogOpen} onOpenChange={setIsEmployeeDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingEmployee ? "Edit Employee" : "Add Employee"}</DialogTitle>
             <DialogDescription>
@@ -587,9 +933,10 @@ export default function SettingsPage() {
             </DialogDescription>
           </DialogHeader>
           <form
+            key={`${editingEmployee?.id ?? "new"}-${employeeAccessUser?.id ?? "no-login"}`}
             onSubmit={(event) => {
               event.preventDefault()
-              handleSaveEmployee(new FormData(event.currentTarget))
+              void handleSaveEmployee(new FormData(event.currentTarget))
             }}
             className="space-y-4"
           >
@@ -643,12 +990,66 @@ export default function SettingsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <Separator />
+              <div className="space-y-4 rounded-md border p-4">
+                <div>
+                  <h3 className="font-medium">Application access</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Login and authorization are stored in WorkLogUser, not on Employee.
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="enableLogin">Enable login</Label>
+                  <Select name="enableLogin" defaultValue={employeeAccessUser ? "true" : "false"}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="true">Enabled</SelectItem>
+                      <SelectItem value="false">Disabled / deactivate linked access</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="accessRole">Role</Label>
+                  <Select name="accessRole" defaultValue={employeeAccessUser?.role === "Admin" ? "Admin" : "Employee"}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Employee">Employee</SelectItem>
+                      <SelectItem value="Admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="cognitoSub">CognitoSub (advanced)</Label>
+                  <Input
+                    id="cognitoSub"
+                    name="cognitoSub"
+                    defaultValue={employeeAccessUser?.cognitoSub || ""}
+                    placeholder="Optional Cognito subject"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="accessActive">WorkLogUser status</Label>
+                  <Select name="accessActive" defaultValue={employeeAccessUser?.active !== false ? "true" : "false"}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="true">Active</SelectItem>
+                      <SelectItem value="false">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsEmployeeDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit">
+              <Button type="submit" disabled={isSaving}>
                 {editingEmployee ? "Save Changes" : "Add Employee"}
               </Button>
             </DialogFooter>

@@ -1,4 +1,6 @@
 using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Bson.Serialization.Conventions;
 
 namespace SC.WorkLog.Infrastructure.Repository
@@ -11,6 +13,8 @@ namespace SC.WorkLog.Infrastructure.Repository
         {
             if (_configured)
                 return;
+
+            BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
 
             var conventionPack = new ConventionPack
             {

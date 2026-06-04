@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { useWorkLog } from "lib/worklog-context"
+import { isClosedWorkItemStatus } from "lib/mock-data"
 import { Button } from "components/ui/button"
 import {
   Dialog,
@@ -78,6 +79,10 @@ export function AddTimeDialog({
   const [assignedToMe, setAssignedToMe] = useState(false)
   const [includeClosed, setIncludeClosed] = useState(false)
 
+  useEffect(() => {
+    setSelectedEmployeeId(currentUser.id)
+  }, [currentUser.id])
+
   const today = defaultDate || new Date().toISOString().split("T")[0]
 
   // Get selected employee for admin functionality
@@ -100,7 +105,7 @@ export function AddTimeDialog({
   const filteredWorkItems = useMemo(() => {
     return workItems.filter((item) => {
       // Status filter
-      if (!includeClosed && item.status === "Closed") return false
+      if (!includeClosed && isClosedWorkItemStatus(item.statusKey)) return false
       
       // Title search
       if (searchTitle && !item.title.toLowerCase().includes(searchTitle.toLowerCase())) return false

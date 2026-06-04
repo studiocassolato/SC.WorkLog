@@ -4,7 +4,13 @@
 
 The current WorkLog frontend is a Vite/React mock application imported from the v0 prototype and stabilized inside `SC.WorkLog.WebApp/client-app`.
 
-All data is local mock data from `src/lib/mock-data.ts`. Runtime state and create/update actions are kept only in React state through `src/lib/worklog-context.tsx`. No backend API, database persistence, Cognito authentication, or authorization service is currently implemented.
+Most business page data is still local mock data from `src/lib/mock-data.ts`. Runtime state and create/update actions for those mock-only pages are kept only in React state through `src/lib/worklog-context.tsx`.
+
+Cognito authentication and backend current-user resolution are now implemented for the application shell. The frontend calls `/api/Auth/Me` after login and uses the backend `WorkLogUser` role/profile for route and navigation visibility. Settings Statuses, Employees and Customers are API-backed. Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, the Project Detail Work Items tab and Work Item Detail read-only are API-backed. The global Work Items page, time entry pages, dashboard, reports, approvals and completeness remain mock-only until later API integration phases.
+
+Settings currently includes Statuses, Customers and Employees. Company Settings is removed from the current WorkLog scope; expected daily hours are stored per Employee, and leave/permission/overtime approvals are handled by admin workflows.
+
+Settings Statuses is API-backed. Business Work Item pages still use local mock WorkItem rows, but their mock `StatusConfig` shape mirrors the backend: stable key, free status name, fixed typology, customer display name, active flag and order. Mock Work Items store `statusKey`, not the editable status name. Closed/open behavior is derived from typology, and the default initial status is the first active `New` typology by order.
 
 This document describes the model and UI behavior that exists today in the frontend. It is intended as a reference for future backend, API, persistence, and security implementation.
 
@@ -54,6 +60,8 @@ This document describes the model and UI behavior that exists today in the front
 | `milestones` | `ProjectMilestone[]` | Project milestones. | Shown in Project Detail. |
 | `createdAt` | `string?` | Project creation date. | Optional mock field. |
 
+Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods and Project Milestones no longer use this mock Project model directly. Mock Project records remain in place because Dashboard, the global Work Items page, Time Entries, reports and other mock-only pages still reference them.
+
 ### ProjectMilestone
 
 | Field | Type | Meaning | Important notes |
@@ -62,6 +70,8 @@ This document describes the model and UI behavior that exists today in the front
 | `projectId` | `string` | Owning project id. | Links milestone to project. |
 | `title` | `string` | Milestone title. | Shown in Project Detail. |
 | `date` | `string` | Milestone date. | Stored as string date. |
+
+For API-backed Project Detail, milestones are loaded from `Project/GetProject` and Admin users can create, update and delete them through backend Project milestone endpoints. Mock milestones remain for mock-only pages that still read local Project records.
 
 ### WorkItem
 
@@ -72,7 +82,7 @@ This document describes the model and UI behavior that exists today in the front
 | `projectId` | `string` | Owning project id. | Links work item to project. |
 | `title` | `string` | Work item title. | Main display value. |
 | `description` | `string` | Work item details. | Shown in detail pages/dialogs. |
-| `status` | `WorkItemStatus` | Work item workflow state. | Configured by `StatusConfig`. |
+| `statusKey` | `WorkItemStatus` | Stable readable status key. | References `StatusConfig.key`; display names are resolved from status config. Backend API uses `StatusKey` as the persisted reference. |
 | `priority` | `WorkItemPriority` | Priority level. | Rendered through priority badges. |
 | `assigneeId` | `string \| null` | Assigned employee id. | `null` means unassigned. |
 | `origin` | `'Manual' \| 'Jira' \| 'Azure DevOps' \| 'Email'` | Source of the work item. | New UI-created work items use `Manual`. |
@@ -80,6 +90,8 @@ This document describes the model and UI behavior that exists today in the front
 | `openingDate` | `string` | Opening date. | Stored as string date. |
 | `closingDate` | `string \| null` | Closing date. | `null` means not closed by date. |
 | `isPriority` | `boolean?` | Priority marker for assignee. | Optional extra flag. |
+
+The Project Detail Work Items tab and Work Item Detail route no longer use this mock WorkItem model. Project Detail reads backend Work Item DTOs filtered by `ProjectId`, and Work Item Detail reads one backend Work Item DTO by id through `WorkItem/GetWorkItem`. The global Work Items page still uses mock WorkItems, so mock ids that do not exist in the backend show the API-backed not-found state on the detail route.
 
 ### TimeEntry
 
@@ -125,6 +137,8 @@ This document describes the model and UI behavior that exists today in the front
 | `createdOn` | `string` | Creation timestamp/date. | Mock audit field. |
 | `createdBy` | `string` | Creator employee id/name. | Mock audit field. |
 
+For API-backed Project Detail, the Contract Periods tab now reads, creates, updates and deletes periods through backend Project contract period endpoints for Annual retainer projects. These mock contract period records remain for Dashboard, reports and other mock-only pages.
+
 ### LeaveRequest
 
 | Field | Type | Meaning | Important notes |
@@ -157,19 +171,20 @@ This document describes the model and UI behavior that exists today in the front
 | `id` | `string` | Comment identifier. | Mock ids use `wic-*`. |
 | `workItemId` | `string` | Related work item. | Links comment to work item. |
 | `employeeId` | `string` | Comment author. | Links comment to employee. |
-| `content` | `string` | Comment text. | Shown in Work Item Detail. |
+| `content` | `string` | Comment text. | Used by mock comment flows; API-backed Work Item Detail does not load comments yet. |
 | `isInternal` | `boolean` | Whether comment is internal. | Internal comments receive distinct styling. |
-| `createdAt` | `string` | Comment timestamp. | Displayed in Work Item Detail. |
+| `createdAt` | `string` | Comment timestamp. | Used by mock comment flows; comments retrieval UI remains pending for API-backed Work Item Detail. |
 
 ### StatusConfig
 
 | Field | Type | Meaning | Important notes |
 | --- | --- | --- | --- |
 | `id` | `string` | Status config identifier. | Mock ids use `status-*`. |
-| `name` | `WorkItemStatus` | Internal work item status. | Must match fixed status values. |
-| `displayName` | `string` | Customer-facing label. | Example: `Open` is displayed as `New`. |
-| `isClosed` | `boolean` | Whether the status is closed. | `Completed` and `Closed` are closed statuses in mock data. |
-| `isInitial` | `boolean` | Whether this is the initial status. | `Open` is initial. |
+| `key` | `WorkItemStatus` | Stable readable status key. | Unique lowercase kebab-case value such as `code-review`; read-only after creation. |
+| `name` | `WorkItemStatus` | Free internal work item status name. | Multiple names can share the same typology. |
+| `typology` | `WorkItemStatusTypology` | Fixed business meaning. | Drives open/closed and waiting behavior. |
+| `customerDisplayName` | `string` | Customer-facing label. | Example: `Code review` can be displayed as `In progress`. |
+| `active` | `boolean` | Whether the status can be selected. | Use inactive instead of delete in this phase. |
 | `order` | `number` | Display/order index. | Used for ordered status presentation. |
 
 ## 3. Enums / fixed values
@@ -193,13 +208,16 @@ This document describes the model and UI behavior that exists today in the front
 - `Suspended`
 - `Closed`
 
-### Work item statuses
+### Work item status typologies
 
-- `Open`
-- `In progress`
-- `On hold`
-- `Completed`
+- `New`
+- `InProgress`
+- `WaitingInternal`
+- `WaitingCustomer`
 - `Closed`
+- `Archived`
+
+Work item status names are configurable. The current default keys are `new`, `in-progress`, `code-review`, `under-analysis`, `waiting-for-customer`, `closed` and `happy-customer`; their current default names are `New`, `In progress`, `Code review`, `Under analysis`, `Waiting for customer`, `Closed` and `Happy customer`.
 
 ### Work item priorities
 
@@ -240,7 +258,7 @@ This document describes the model and UI behavior that exists today in the front
 
 ## 5. Project payment types and economics
 
-Economic calculations are frontend-only mock calculations today. They are mostly implemented in `ProjectDetail.tsx` and are visible only to Admin users.
+On API-backed Project Detail, economics, payments and contract periods use backend DTOs from `Project/GetProjectEconomics` and the Project payment/contract-period endpoints. The mock formulas in this section describe Dashboard, reports and other mock-only pages that still use `mock-data.ts`.
 
 ### Time & material
 
@@ -253,6 +271,8 @@ Time & material projects use project-specific rates by employee level:
 When a `TimeEntry` is created, the frontend stores a `projectRateSnapshot`. Worked value uses `approvedTime`, not raw logged `time`.
 
 `ProjectPayment` records represent payments received for a Time & material project. Payment history and balance are shown in the `Payments` tab.
+
+For API-backed Project Detail, the Payments tab now reads, creates, updates and deletes payments through backend Project payment endpoints for Time & material projects. These mock payment records remain for Dashboard, reports and other mock-only pages.
 
 Formulas:
 
@@ -300,7 +320,7 @@ Current frontend notes:
 - Active period detection uses the current date and period date interval.
 - The UI warns when there is no active period.
 - The UI warns when internal usage exceeds the active period amount.
-- To verify: the documented linear `ExpectedCumulativeValue` and `Delta` concepts are represented in the intended retainer behavior, but the current UI implementation should be reviewed before moving this calculation backend-side.
+- On API-backed Project Detail, linear `ExpectedCumulativeValue` and `Delta` values are returned by backend Annual retainer economics DTOs and formatted by the frontend.
 
 ### Internal
 
@@ -356,7 +376,7 @@ Current frontend behavior:
 
 ## 8. Role visibility rules
 
-The current role model is frontend-only and uses a mock role switcher with values `Admin` and `Employee`.
+Route and navigation authorization use the backend current user returned by `/api/Auth/Me`. API-backed pages such as Settings and Project Detail use `useAuth().isAdmin`. Mock-only pages can still read `useWorkLog().role`, including the demo role switcher when enabled.
 
 Admin can see:
 
@@ -382,9 +402,10 @@ Employee must not see:
 
 Current implementation notes:
 
-- Admin-only navigation items are hidden from Employee users.
+- Admin-only navigation items are hidden from Employee users using backend current-user state.
 - Admin-only routes redirect Employee users to `/my-day`.
-- Project Detail conditionally renders economics, payments, contract periods, settings, and approved time columns based on the role.
+- Project Detail conditionally renders economics, payments, contract periods, settings, billing values and approved time columns based on backend `isAdmin`.
+- The demo role switcher is not a backend security boundary and should not be used to test API authorization.
 
 ## 9. Implemented pages
 
@@ -412,9 +433,9 @@ Current implementation notes:
 ### Project Detail
 
 - Purpose: Detailed project page with overview, work items, time entries, milestones, and economics.
-- Main data used: project, customer, work items, time entries, payments, contract periods, employees.
-- Main actions: view tabs, review economics, add payment/period mock dialogs, edit settings mock values.
-- Visibility: Admin and Employee, but economic sections are Admin-only.
+- Main data used: backend project detail, customer, milestones, project work items, economics, payments and contract periods.
+- Main actions: view API-backed overview/economics/work items, create/update/delete milestones, create/update/delete Time & material payments, create/update/delete Annual retainer contract periods, and edit base project fields.
+- Visibility: Admin and Employee can view allowed project detail data; economics, payments, contract periods, billing values and write actions are Admin-only. The Time Entries tab remains an API integration pending state.
 
 ### Work Items
 
@@ -425,10 +446,10 @@ Current implementation notes:
 
 ### Work Item Detail
 
-- Purpose: Detailed work item view with status, priority, comments, metadata, and linked time.
-- Main data used: work item, comments, projects, customers, employees, time entries.
-- Main actions: change status, add comment, review metadata.
-- Visibility: Admin and Employee. Economic details are not the focus of this page.
+- Purpose: Read-only API-backed work item view with status, priority, metadata and logged/approved hour summary.
+- Main data used: backend Work Item detail DTO from `WorkItem/GetWorkItem`.
+- Main actions: review metadata. Status change, edit, assign/unassign and comments retrieval/write UI remain pending.
+- Visibility: Admin and Employee. Approved hours are shown only when returned by the backend for Admin users.
 
 ### Time Entries
 
@@ -460,9 +481,9 @@ Current implementation notes:
 
 ### Settings
 
-- Purpose: Admin configuration for customers and employees.
-- Main data used: customers, employees.
-- Main actions: add/update customers, add/update employees.
+- Purpose: Admin configuration for Statuses, Customers and Employees.
+- Main data used: backend status configs, customers, employees and linked `WorkLogUser` records.
+- Main actions: create/update configurable statuses, add/update customers, add/update employees, and manage related application access behind the scenes.
 - Visibility: Admin-only route.
 
 ### User Settings
@@ -492,24 +513,21 @@ Current implementation notes:
 
 ## 11. Mock-only areas
 
-The following areas are mocked and must later be replaced or backed by backend/API behavior:
+The following areas are still mock-only until their API integration phases:
 
-- data loading
-- create/update/delete actions
-- authentication
-- role management
-- permissions
-- calculations if they move backend-side
-- report generation
-- persistence
-- customer/domain login behavior
-- project payment creation
-- contract period creation
-- audit fields such as `createdBy` and `createdOn`
+- Dashboard data and KPIs.
+- Global Work Items page.
+- Work Item comments retrieval UI.
+- Time Entries pages and create/update UI.
+- My Day.
+- Approvals.
+- Customer Reports.
+- Time Completeness.
+- Mock-context CRUD used by those pages for entities already backed elsewhere.
 
-## 12. Notes for backend implementation
+## 12. Notes for remaining API implementation
 
-Entities that should likely become backend/domain entities:
+Entities already represented in backend Domain/Application models include:
 
 - `Employee`
 - `Customer`
@@ -524,14 +542,14 @@ Entities that should likely become backend/domain entities:
 - `WorkItemComment`
 - `StatusConfig`
 
-Calculations that should probably be backend-owned:
+Calculations already owned or intended to stay owned by backend/domain services:
 
 - approved-time based billing values
 - Time & material worked value and balance
 - Fixed price internal value, budget consumption, and remaining margin
 - Annual retainer period assignment, consumption, balance, and expected-vs-actual tracking
-- daily completeness, missing hours, and overtime creation
-- report exports when they become official customer/admin reports
+- daily completeness, missing hours, and overtime creation;
+- report exports when they become official customer/admin reports.
 
 Frontend calculations can remain duplicated for display only when:
 
@@ -539,20 +557,10 @@ Frontend calculations can remain duplicated for display only when:
 - frontend calculations are used only for optimistic UI or local visual summaries;
 - the UI clearly avoids treating frontend-only values as trusted security/business values.
 
-Suggested API boundaries:
+API endpoints should follow the current WebApp convention:
 
-- `/api/employees`
-- `/api/customers`
-- `/api/projects`
-- `/api/projects/{projectId}/work-items`
-- `/api/work-items/{workItemId}/comments`
-- `/api/time-entries`
-- `/api/projects/{projectId}/payments`
-- `/api/projects/{projectId}/contract-periods`
-- `/api/leave-requests`
-- `/api/overtime-requests`
-- `/api/reports/customer`
-- `/api/time-completeness`
+- `api/[controller]/[action]`
+- examples: `Project/GetProject`, `Project/DeleteProjectPayment`, `WorkItem/GetWorkItems`, `WorkItem/GetWorkItem`, `TimeEntry/GetTimeEntries`
 
 Security considerations:
 

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { cn } from 'lib/utils'
 import { useHistory } from 'react-router-dom'
+import { isClosedWorkItemStatus } from 'lib/mock-data'
 
 export default function MyDayPage() {
   const {
@@ -67,7 +68,7 @@ export default function MyDayPage() {
 
   // Get priority work items for current user
   const myPriorityItems = workItems.filter(
-    (w) => w.assigneeId === currentUser.id && w.isPriority && w.status !== 'Closed' && w.status !== 'Completed'
+    (w) => w.assigneeId === currentUser.id && w.isPriority && !isClosedWorkItemStatus(w.statusKey)
   )
 
   // Calculate status

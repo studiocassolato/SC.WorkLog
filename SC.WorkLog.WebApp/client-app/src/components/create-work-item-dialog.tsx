@@ -27,12 +27,14 @@ interface CreateWorkItemDialogProps {
 }
 
 export function CreateWorkItemDialog({ open, onOpenChange }: CreateWorkItemDialogProps) {
-  const { projects, customers, employees, addWorkItem } = useWorkLog()
+  const { projects, customers, employees, statusConfigs, addWorkItem } = useWorkLog()
+  const activeStatuses = statusConfigs.filter((status) => status.active).sort((a, b) => a.order - b.order)
+  const initialStatusKey = activeStatuses.find((status) => status.typology === 'New')?.key ?? activeStatuses[0]?.key ?? 'new'
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [projectId, setProjectId] = useState('')
-  const [status, setStatus] = useState<WorkItemStatus>('Open')
+  const [statusKey, setStatusKey] = useState<WorkItemStatus>(initialStatusKey)
   const [priority, setPriority] = useState<WorkItemPriority>('Normal')
   const [assigneeId, setAssigneeId] = useState<string>('__unassigned__')
 
@@ -43,7 +45,7 @@ export function CreateWorkItemDialog({ open, onOpenChange }: CreateWorkItemDialo
       projectId,
       title,
       description,
-      status,
+      statusKey,
       priority,
       assigneeId: assigneeId === '__unassigned__' ? null : assigneeId,
       origin: 'Manual',
@@ -56,7 +58,7 @@ export function CreateWorkItemDialog({ open, onOpenChange }: CreateWorkItemDialo
     setTitle('')
     setDescription('')
     setProjectId('')
-    setStatus('Open')
+    setStatusKey(initialStatusKey)
     setPriority('Normal')
     setAssigneeId('__unassigned__')
     onOpenChange(false)
@@ -105,14 +107,16 @@ export function CreateWorkItemDialog({ open, onOpenChange }: CreateWorkItemDialo
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={status} onValueChange={(v) => setStatus(v as WorkItemStatus)}>
+              <Select value={statusKey} onValueChange={(v) => setStatusKey(v as WorkItemStatus)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Open">Open</SelectItem>
-                  <SelectItem value="In progress">In progress</SelectItem>
-                  <SelectItem value="On hold">On hold</SelectItem>
+                  {activeStatuses.map((statusConfig) => (
+                    <SelectItem key={statusConfig.id} value={statusConfig.key}>
+                      {statusConfig.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

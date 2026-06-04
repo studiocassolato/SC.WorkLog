@@ -1,0 +1,14 @@
+using System;
+
+namespace SC.WorkLog.Application.DTO.Customers
+{
+    public class CreateCustomerRequest
+    {
+        public string CompanyName { get; set; }
+        public string CompanyDomain { get; set; }
+        public string ContactPerson { get; set; }
+        public string ContactEmail { get; set; }
+        public string ContactPhone { get; set; }
+        public bool Active { get; set; }
+    }
+}

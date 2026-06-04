@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useAuth, type WorkLogCurrentUser } from 'helpers/services/AuthContext'
 import {
   employees,
   customers,
@@ -64,7 +65,24 @@ interface WorkLogContextType {
 
 const WorkLogContext = createContext<WorkLogContextType | undefined>(undefined)
 
+const createBackendEmployeeFallback = (backendCurrentUser: WorkLogCurrentUser): Employee => {
+  const displayName = backendCurrentUser.name || backendCurrentUser.email || 'Backend WorkLog user'
+  const [firstName, ...lastNameParts] = displayName.trim().split(/\s+/)
+
+  return {
+    id: backendCurrentUser.employeeId ?? 'backend-employee',
+    firstName: firstName || 'Backend',
+    lastName: lastNameParts.join(' ') || 'WorkLog profile (mock fallback)',
+    email: backendCurrentUser.email,
+    level: 'Senior',
+    defaultHourlyRate: 0,
+    expectedDailyHours: 8,
+    active: true,
+  }
+}
+
 export function WorkLogProvider({ children }: { children: ReactNode }) {
+  const { currentUser: backendCurrentUser } = useAuth()
   const [role, setRole] = useState<UserRole>('Admin')
   const [employeesData, setEmployeesData] = useState<Employee[]>(employees)
   const [customersData, setCustomersData] = useState<Customer[]>(customers)
@@ -78,8 +96,29 @@ export function WorkLogProvider({ children }: { children: ReactNode }) {
   const [projectPaymentsData] = useState<ProjectPayment[]>(projectPayments)
   const [projectContractPeriodsData] = useState<ProjectContractPeriod[]>(projectContractPeriods)
 
-  // Current user is always the first employee (Nicola Cassolato)
-  const currentUser = employeesData[0]
+  const currentUser = useMemo(() => {
+    if (backendCurrentUser?.isEmployee && backendCurrentUser.employeeId) {
+      return employeesData.find((employee) => employee.id === backendCurrentUser.employeeId)
+        ?? createBackendEmployeeFallback(backendCurrentUser)
+    }
+
+    return employeesData[0]
+  }, [backendCurrentUser, employeesData])
+
+  useEffect(() => {
+    if (!backendCurrentUser?.isEmployee || !backendCurrentUser.employeeId) return
+    if (employeesData.some((employee) => employee.id === backendCurrentUser.employeeId)) return
+
+    console.warn(
+      `WorkLog mock data does not contain employee ${backendCurrentUser.employeeId}; using a temporary backend-profile fallback until pages are API-backed.`
+    )
+  }, [backendCurrentUser, employeesData])
+
+  useEffect(() => {
+    if (backendCurrentUser?.role === 'Admin' || backendCurrentUser?.role === 'Employee') {
+      setRole(backendCurrentUser.role)
+    }
+  }, [backendCurrentUser?.role])
 
   const addTimeEntry = (entry: Omit<TimeEntry, 'id'>) => {
     const newEntry = { ...entry, id: `te-${Date.now()}` }

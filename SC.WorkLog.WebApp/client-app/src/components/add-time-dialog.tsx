@@ -1,6 +1,15 @@
-import { useEffect, useState, useMemo } from "react"
-import { useWorkLog } from "lib/worklog-context"
-import { isClosedWorkItemStatus } from "lib/mock-data"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useAuth } from "helpers/services/AuthContext"
+import {
+  createTimeEntry,
+  getActiveEmployees,
+  getProjects,
+  getWorkItems,
+  type EmployeeDto,
+  type ProjectListItemDto,
+  type WorkItemFilter,
+  type WorkItemListItemDto,
+} from "helpers/services/worklog-api"
 import { Button } from "components/ui/button"
 import {
   Dialog,
@@ -18,9 +27,15 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "components/ui/drawer"
+import { Alert, AlertDescription, AlertTitle } from "components/ui/alert"
+import { Checkbox } from "components/ui/checkbox"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "components/ui/collapsible"
 import { Input } from "components/ui/input"
 import { Label } from "components/ui/label"
-import { Textarea } from "components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -28,24 +43,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "components/ui/select"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "components/ui/alert-dialog"
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "components/ui/collapsible"
-import { Checkbox } from "components/ui/checkbox"
+import { Textarea } from "components/ui/textarea"
 import { useIsMobile } from "hooks/use-mobile"
-import { Search, ChevronDown, ChevronUp, Filter } from "lucide-react"
+import { ChevronDown, ChevronUp, Filter, Search, ShieldAlert } from "lucide-react"
+import { toast } from "sonner"
 
 const hourOptions = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8]
 
@@ -56,6 +57,26 @@ interface AddTimeDialogProps {
   defaultDate?: string
 }
 
+const getErrorMessage = (error: unknown) => {
+  const responseData = typeof error === "object" && error && "response" in error
+    ? (error as { response?: { status?: number; data?: unknown } }).response
+    : null
+  const status = responseData?.status
+  const errors = responseData?.data && typeof responseData.data === "object"
+    ? ((responseData.data as { errors?: unknown; Errors?: unknown }).errors ?? (responseData.data as { errors?: unknown; Errors?: unknown }).Errors)
+    : null
+
+  if (status === 401) return "Authentication required. Please sign in again."
+  if (status === 403) return "You do not have permission to add time."
+  if (Array.isArray(errors) && errors.every((item) => typeof item === "string")) return errors.join(" ")
+  if (error instanceof Error && error.message) return error.message
+  return "Unable to save time entry. Please try again."
+}
+
+const toDateInputValue = (value?: string) => value || new Date().toISOString().split("T")[0]
+
+const isHalfHourIncrement = (value: number) => Number.isFinite(value) && value > 0 && Number.isInteger(value * 2)
+
 export function AddTimeDialog({
   open,
   onOpenChange,
@@ -63,246 +84,299 @@ export function AddTimeDialog({
   defaultDate,
 }: AddTimeDialogProps) {
   const isMobile = useIsMobile()
-  const { workItems, projects, customers, employees, currentUser, timeEntries, addTimeEntry, role } = useWorkLog()
-  
+  const { currentUser, isAdmin } = useAuth()
+  const [employees, setEmployees] = useState<EmployeeDto[]>([])
+  const [projects, setProjects] = useState<ProjectListItemDto[]>([])
+  const [workItems, setWorkItems] = useState<WorkItemListItemDto[]>([])
+  const [employeeId, setEmployeeId] = useState("")
   const [workItemId, setWorkItemId] = useState(defaultWorkItemId || "")
-  const [hours, setHours] = useState<number>(1)
+  const [date, setDate] = useState(toDateInputValue(defaultDate))
+  const [hours, setHours] = useState(1)
   const [description, setDescription] = useState("")
-  const [showOvertimeConfirm, setShowOvertimeConfirm] = useState(false)
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState(currentUser.id)
-  
-  // Search/filter state
+  const [notes, setNotes] = useState("")
   const [showSearch, setShowSearch] = useState(false)
-  const [searchTitle, setSearchTitle] = useState("")
-  const [searchCustomerId, setSearchCustomerId] = useState<string>("all")
-  const [searchProjectId, setSearchProjectId] = useState<string>("all")
+  const [search, setSearch] = useState("")
+  const [customerId, setCustomerId] = useState("all")
+  const [projectId, setProjectId] = useState("all")
   const [assignedToMe, setAssignedToMe] = useState(false)
   const [includeClosed, setIncludeClosed] = useState(false)
+  const [isLoadingReferences, setIsLoadingReferences] = useState(false)
+  const [isLoadingWorkItems, setIsLoadingWorkItems] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
-  useEffect(() => {
-    setSelectedEmployeeId(currentUser.id)
-  }, [currentUser.id])
-
-  const today = defaultDate || new Date().toISOString().split("T")[0]
-
-  // Get selected employee for admin functionality
-  const selectedEmployee = employees.find(e => e.id === selectedEmployeeId) || currentUser
-
-  // Calculate current daily hours for selected employee
-  const currentDailyHours = timeEntries
-    .filter((e) => e.employeeId === selectedEmployeeId && e.date === today)
-    .reduce((sum, e) => sum + e.time, 0)
-
-  const willCreateOvertime = currentDailyHours + hours > selectedEmployee.expectedDailyHours
-
-  // Get projects for selected customer (for cascading filter)
-  const projectsForCustomer = useMemo(() => {
-    if (searchCustomerId === "all") return projects
-    return projects.filter(p => p.customerId === searchCustomerId)
-  }, [projects, searchCustomerId])
-
-  // Filter work items based on search criteria
-  const filteredWorkItems = useMemo(() => {
-    return workItems.filter((item) => {
-      // Status filter
-      if (!includeClosed && isClosedWorkItemStatus(item.statusKey)) return false
-      
-      // Title search
-      if (searchTitle && !item.title.toLowerCase().includes(searchTitle.toLowerCase())) return false
-      
-      // Customer filter
-      if (searchCustomerId !== "all") {
-        const project = projects.find(p => p.id === item.projectId)
-        if (project?.customerId !== searchCustomerId) return false
-      }
-      
-      // Project filter
-      if (searchProjectId !== "all" && item.projectId !== searchProjectId) return false
-      
-      // Assigned to me filter
-      if (assignedToMe && item.assigneeId !== currentUser.id) return false
-      
-      return true
+  const currentEmployeeId = currentUser?.employeeId ?? ""
+  const employeeOptions = isAdmin ? employees : []
+  const selectedEmployeeId = isAdmin ? employeeId : currentEmployeeId
+  const selectedProject = projects.find((project) => project.id === projectId)
+  const customers = useMemo(() => {
+    const map = new Map<string, string>()
+    projects.forEach((project) => {
+      if (project.customerId && project.customerName) map.set(project.customerId, project.customerName)
     })
-  }, [workItems, projects, searchTitle, searchCustomerId, searchProjectId, assignedToMe, includeClosed, currentUser.id])
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+  }, [projects])
+  const projectsForCustomer = useMemo(
+    () => customerId === "all" ? projects : projects.filter((project) => project.customerId === customerId),
+    [customerId, projects],
+  )
 
-  // Reset project filter when customer changes
-  const handleCustomerChange = (value: string) => {
-    setSearchCustomerId(value)
-    setSearchProjectId("all")
-  }
-
-  const handleSubmit = () => {
-    if (willCreateOvertime) {
-      setShowOvertimeConfirm(true)
-    } else {
-      saveEntry()
-    }
-  }
-
-  const saveEntry = () => {
-    const workItem = workItems.find((w) => w.id === workItemId)
-    const project = projects.find((p) => p.id === workItem?.projectId)
-
-    let projectRate = selectedEmployee.defaultHourlyRate
-    if (project?.paymentType === "Time & material") {
-      if (selectedEmployee.level === "Junior") projectRate = project.juniorRate || projectRate
-      else if (selectedEmployee.level === "Mid") projectRate = project.midRate || projectRate
-      else projectRate = project.seniorRate || projectRate
-    }
-
-    addTimeEntry({
-      employeeId: selectedEmployeeId,
-      workItemId,
-      date: today,
-      time: hours,
-      approvedTime: hours,
-      description,
-      adminNote: null,
-      employeeLevelSnapshot: selectedEmployee.level,
-      defaultRateSnapshot: selectedEmployee.defaultHourlyRate,
-      projectRateSnapshot: projectRate,
-    })
-
-    // Reset form
-    setWorkItemId("")
+  const resetForm = useCallback(() => {
+    setWorkItemId(defaultWorkItemId || "")
+    setDate(toDateInputValue(defaultDate))
     setHours(1)
     setDescription("")
+    setNotes("")
     setShowSearch(false)
-    setSearchTitle("")
-    setSearchCustomerId("all")
-    setSearchProjectId("all")
+    setSearch("")
+    setCustomerId("all")
+    setProjectId("all")
     setAssignedToMe(false)
     setIncludeClosed(false)
-    onOpenChange(false)
-    setShowOvertimeConfirm(false)
+    setErrorMessage(null)
+  }, [defaultDate, defaultWorkItemId])
+
+  useEffect(() => {
+    if (!open) return
+    resetForm()
+    setEmployeeId(currentEmployeeId)
+  }, [currentEmployeeId, open, resetForm])
+
+  useEffect(() => {
+    if (!open) return
+
+    const loadReferences = async () => {
+      setIsLoadingReferences(true)
+      setErrorMessage(null)
+      try {
+        const [projectResponse, employeeResponse] = await Promise.all([
+          getProjects(),
+          isAdmin ? getActiveEmployees() : Promise.resolve([]),
+        ])
+        setProjects(projectResponse)
+        setEmployees(employeeResponse)
+        if (isAdmin) {
+          const defaultEmployeeId = currentEmployeeId || employeeResponse[0]?.id || ""
+          setEmployeeId(defaultEmployeeId)
+        }
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error))
+      } finally {
+        setIsLoadingReferences(false)
+      }
+    }
+
+    void loadReferences()
+  }, [currentEmployeeId, isAdmin, open])
+
+  useEffect(() => {
+    if (!open) return
+
+    const loadWorkItems = async () => {
+      setIsLoadingWorkItems(true)
+      try {
+        const filter: WorkItemFilter = {
+          search: search.trim() || undefined,
+          customerId: customerId === "all" ? undefined : customerId,
+          projectId: projectId === "all" ? undefined : projectId,
+          assigneeId: assignedToMe && currentEmployeeId ? currentEmployeeId : undefined,
+          includeClosed,
+        }
+        const response = await getWorkItems(filter)
+        setWorkItems(response)
+      } catch (error) {
+        setWorkItems([])
+        setErrorMessage(getErrorMessage(error))
+      } finally {
+        setIsLoadingWorkItems(false)
+      }
+    }
+
+    const handle = window.setTimeout(() => void loadWorkItems(), 250)
+    return () => window.clearTimeout(handle)
+  }, [assignedToMe, currentEmployeeId, customerId, includeClosed, open, projectId, search])
+
+  const validationMessage = useMemo(() => {
+    if (!selectedEmployeeId) return "Employee is required."
+    if (!workItemId) return "Work Item is required."
+    if (!date) return "Date is required."
+    if (!isHalfHourIncrement(hours)) return "Time must be greater than zero and use 0.5 hour increments."
+    return null
+  }, [date, hours, selectedEmployeeId, workItemId])
+
+  const handleCustomerChange = (value: string) => {
+    setCustomerId(value)
+    setProjectId("all")
   }
 
-  const getWorkItemDisplay = (workItem: (typeof workItems)[0]) => {
-    const project = projects.find((p) => p.id === workItem.projectId)
-    const customer = customers.find((c) => c.id === project?.customerId)
-    return `${workItem.title} (${customer?.companyName || "Unknown"})`
+  const handleSubmit = async () => {
+    if (validationMessage) {
+      setErrorMessage(validationMessage)
+      return
+    }
+
+    setIsSaving(true)
+    setErrorMessage(null)
+    try {
+      const created = await createTimeEntry({
+        employeeId: selectedEmployeeId,
+        workItemId,
+        date,
+        time: hours,
+        description: description.trim() || null,
+        notes: notes.trim() || null,
+      })
+      toast.success("Time entry saved.")
+      window.dispatchEvent(new CustomEvent("worklog:time-entry-saved", { detail: created }))
+      onOpenChange(false)
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error))
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const getWorkItemDisplay = (workItem: WorkItemListItemDto) => {
+    const code = workItem.code ? `${workItem.code} - ` : ""
+    const project = workItem.projectName ? ` · ${workItem.projectName}` : ""
+    const customer = workItem.customerName ? ` · ${workItem.customerName}` : ""
+    const status = workItem.statusName || workItem.statusKey
+    const assignee = workItem.assigneeName ? ` · ${workItem.assigneeName}` : ""
+    return `${code}${workItem.title}${project}${customer} · ${status}${assignee}`
   }
 
   const content = (
     <div className="space-y-4">
-      {/* Admin: Employee selector */}
-      {role === "Admin" && (
+      {errorMessage && (
+        <Alert variant="destructive">
+          <ShieldAlert className="h-4 w-4" />
+          <AlertTitle>Unable to save time</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      )}
+
+      {isAdmin ? (
         <div className="space-y-2">
           <Label htmlFor="employee">Employee</Label>
-          <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
-            <SelectTrigger>
+          <Select value={employeeId} onValueChange={setEmployeeId} disabled={isLoadingReferences || isSaving}>
+            <SelectTrigger id="employee">
               <SelectValue placeholder="Select employee" />
             </SelectTrigger>
             <SelectContent>
-              {employees.filter(e => e.active).map((emp) => (
-                <SelectItem key={emp.id} value={emp.id}>
-                  {emp.firstName} {emp.lastName}
+              {employeeOptions.map((employee) => (
+                <SelectItem key={employee.id} value={employee.id}>
+                  {employee.firstName} {employee.lastName}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
+      ) : (
+        <input type="hidden" value={selectedEmployeeId} readOnly />
       )}
 
       <div className="space-y-2">
+        <Label htmlFor="date">Date</Label>
+        <Input id="date" type="date" value={date} onChange={(event) => setDate(event.target.value)} disabled={isSaving} />
+      </div>
+
+      <div className="space-y-2">
         <Label htmlFor="workItem">Work Item</Label>
-        <Select value={workItemId} onValueChange={setWorkItemId}>
-          <SelectTrigger>
-            <SelectValue placeholder="Select a work item" />
+        <Select value={workItemId} onValueChange={setWorkItemId} disabled={isLoadingWorkItems || isSaving}>
+          <SelectTrigger id="workItem">
+            <SelectValue placeholder={isLoadingWorkItems ? "Loading work items..." : "Select a work item"} />
           </SelectTrigger>
           <SelectContent>
-            {filteredWorkItems.slice(0, 20).map((item) => (
+            {workItems.map((item) => (
               <SelectItem key={item.id} value={item.id}>
                 {getWorkItemDisplay(item)}
               </SelectItem>
             ))}
-            {filteredWorkItems.length > 20 && (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                Showing first 20 items. Use search to filter.
-              </div>
+            {workItems.length === 0 && (
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">No work items found.</div>
             )}
           </SelectContent>
         </Select>
-        
-        {/* Search/Filter Collapsible */}
+
         <Collapsible open={showSearch} onOpenChange={setShowSearch}>
           <CollapsibleTrigger asChild>
             <Button variant="ghost" size="sm" className="w-full justify-between h-8 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Filter className="h-3 w-3" />
-                Search...
+                Search and filters
               </span>
               {showSearch ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="space-y-3 pt-2">
             <div className="space-y-2">
-              <Label className="text-xs">Title</Label>
+              <Label className="text-xs">Search</Label>
               <div className="relative">
                 <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-                <Input 
-                  placeholder="Search by title..."
-                  value={searchTitle}
-                  onChange={(e) => setSearchTitle(e.target.value)}
+                <Input
+                  placeholder="Code, title or description..."
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
                   className="h-8 pl-7 text-sm"
                 />
               </div>
             </div>
-            
+
             <div className="grid gap-2 grid-cols-2">
               <div className="space-y-1">
                 <Label className="text-xs">Customer</Label>
-                <Select value={searchCustomerId} onValueChange={handleCustomerChange}>
+                <Select value={customerId} onValueChange={handleCustomerChange}>
                   <SelectTrigger className="h-8 text-sm">
                     <SelectValue placeholder="All" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Customers</SelectItem>
-                    {customers.filter(c => c.active).map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>
+                    {customers.map((customer) => (
+                      <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
-              
+
               <div className="space-y-1">
                 <Label className="text-xs">Project</Label>
-                <Select value={searchProjectId} onValueChange={setSearchProjectId}>
+                <Select value={projectId} onValueChange={setProjectId}>
                   <SelectTrigger className="h-8 text-sm">
                     <SelectValue placeholder="All" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Projects</SelectItem>
-                    {projectsForCustomer.filter(p => p.active).map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    {projectsForCustomer.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
-            
+
             <div className="flex items-center gap-4">
               <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="assignedToMe" 
+                <Checkbox
+                  id="assignedToMe"
                   checked={assignedToMe}
                   onCheckedChange={(checked) => setAssignedToMe(checked === true)}
+                  disabled={!currentEmployeeId}
                 />
                 <label htmlFor="assignedToMe" className="text-xs">Assigned to me</label>
               </div>
               <div className="flex items-center space-x-2">
-                <Checkbox 
-                  id="includeClosed" 
+                <Checkbox
+                  id="includeClosed"
                   checked={includeClosed}
                   onCheckedChange={(checked) => setIncludeClosed(checked === true)}
                 />
                 <label htmlFor="includeClosed" className="text-xs">Include closed</label>
               </div>
             </div>
-            
+
             <div className="text-xs text-muted-foreground">
-              {filteredWorkItems.length} work items found
+              {isLoadingWorkItems ? "Loading work items..." : `${workItems.length} work items found`}
+              {selectedProject ? ` in ${selectedProject.name}` : ""}
             </div>
           </CollapsibleContent>
         </Collapsible>
@@ -312,38 +386,33 @@ export function AddTimeDialog({
         <Label>Hours</Label>
         {isMobile ? (
           <div className="flex flex-wrap gap-2">
-            {[0.5, 1, 1.5, 2, 4, 8].map((h) => (
+            {[0.5, 1, 1.5, 2, 4, 8].map((value) => (
               <Button
-                key={h}
+                key={value}
                 type="button"
-                variant={hours === h ? "default" : "outline"}
+                variant={hours === value ? "default" : "outline"}
                 size="sm"
-                onClick={() => setHours(h)}
+                onClick={() => setHours(value)}
+                disabled={isSaving}
               >
-                {h}h
+                {value}h
               </Button>
             ))}
           </div>
         ) : (
-          <Select value={hours.toString()} onValueChange={(v) => setHours(parseFloat(v))}>
+          <Select value={hours.toString()} onValueChange={(value) => setHours(parseFloat(value))} disabled={isSaving}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {hourOptions.map((h) => (
-                <SelectItem key={h} value={h.toString()}>
-                  {h} hour{h !== 1 ? "s" : ""}
+              {hourOptions.map((value) => (
+                <SelectItem key={value} value={value.toString()}>
+                  {value} hour{value !== 1 ? "s" : ""}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         )}
-        <p className="text-xs text-muted-foreground">
-          Today: {currentDailyHours}h / {selectedEmployee.expectedDailyHours}h expected
-          {role === "Admin" && selectedEmployeeId !== currentUser.id && (
-            <span className="ml-1">({selectedEmployee.firstName})</span>
-          )}
-        </p>
       </div>
 
       <div className="space-y-2">
@@ -352,8 +421,21 @@ export function AddTimeDialog({
           id="description"
           placeholder="What did you work on?"
           value={description}
-          onChange={(e) => setDescription(e.target.value)}
+          onChange={(event) => setDescription(event.target.value)}
           rows={3}
+          disabled={isSaving}
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="notes">Notes (optional)</Label>
+        <Textarea
+          id="notes"
+          placeholder="Additional notes"
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          rows={2}
+          disabled={isSaving}
         />
       </div>
     </div>
@@ -361,76 +443,40 @@ export function AddTimeDialog({
 
   if (isMobile) {
     return (
-      <>
-        <Drawer open={open} onOpenChange={onOpenChange}>
-          <DrawerContent>
-            <DrawerHeader>
-              <DrawerTitle>Add Time Entry</DrawerTitle>
-              <DrawerDescription>Log your work for today</DrawerDescription>
-            </DrawerHeader>
-            <div className="px-4 pb-4">{content}</div>
-            <DrawerFooter>
-              <Button onClick={handleSubmit} disabled={!workItemId} className="w-full">
-                Save Entry
-              </Button>
-            </DrawerFooter>
-          </DrawerContent>
-        </Drawer>
-
-        <AlertDialog open={showOvertimeConfirm} onOpenChange={setShowOvertimeConfirm}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>You are logging overtime</AlertDialogTitle>
-              <AlertDialogDescription>
-                With this entry you will exceed the expected daily hours. An overtime approval
-                request will be created.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={saveEntry}>Confirm and save</AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </>
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Add Time Entry</DrawerTitle>
+            <DrawerDescription>Log work against a backend Work Item.</DrawerDescription>
+          </DrawerHeader>
+          <div className="px-4 pb-4">{content}</div>
+          <DrawerFooter>
+            <Button onClick={handleSubmit} disabled={!!validationMessage || isSaving || isLoadingReferences} className="w-full">
+              {isSaving ? "Saving..." : "Save Entry"}
+            </Button>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
     )
   }
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Time Entry</DialogTitle>
-            <DialogDescription>Log your work for today</DialogDescription>
-          </DialogHeader>
-          {content}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={!workItemId}>
-              Save Entry
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <AlertDialog open={showOvertimeConfirm} onOpenChange={setShowOvertimeConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>You are logging overtime</AlertDialogTitle>
-            <AlertDialogDescription>
-              With this entry you will exceed the expected daily hours. An overtime approval request
-              will be created.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={saveEntry}>Confirm and save</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Time Entry</DialogTitle>
+          <DialogDescription>Log work against a backend Work Item.</DialogDescription>
+        </DialogHeader>
+        {content}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} disabled={!!validationMessage || isSaving || isLoadingReferences}>
+            {isSaving ? "Saving..." : "Save Entry"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

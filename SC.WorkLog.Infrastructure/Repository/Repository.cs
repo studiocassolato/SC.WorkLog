@@ -68,6 +68,12 @@ namespace SC.WorkLog.Infrastructure.Repository
             await _collection.ReplaceOneAsync(x => x.Id == entity.Id, entity, new ReplaceOptions { IsUpsert = true });
         }
 
+        public async Task<long> UpdateManyField<TField>(Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, TField>> field, TField value)
+        {
+            var result = await _collection.UpdateManyAsync(predicate, Builders<TEntity>.Update.Set(field, value));
+            return result.ModifiedCount;
+        }
+
         public async Task<long> GetCount(Expression<Func<TEntity, bool>> predicate)
         {
             return await _collection.CountDocumentsAsync(predicate);

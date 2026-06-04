@@ -65,6 +65,42 @@ Backend current-user resolution:
 
 `/api/Auth/Me` returns the Application DTO `CurrentUserResponse`. The frontend current-user type is aligned to that response shape, but role/profile authority remains the backend `WorkLogUser`; frontend role switching is still demo-only.
 
+## Time Entry Authorization
+
+Backend services are the authorization boundary. Frontend hiding is only a UX layer.
+
+- `TimeEntry/GetTimeEntries` scopes non-admin users to `WorkLogUserContext.EmployeeId`, regardless of a missing or spoofed `EmployeeId` query parameter.
+- Employee users can create and update only their own TimeEntries; Admin users can create/update for another active employee.
+- `CreateTimeEntryRequest` and `UpdateTimeEntryRequest` do not accept `ProjectId`, `ApprovedTime`, rates or snapshots. The backend derives `ProjectId` from the selected WorkItem and owns snapshots.
+- `TimeEntry/UpdateApprovedTime` is Admin-only and is the only ApprovedTime write path.
+- Non-admin TimeEntry DTO responses return null for ApprovedTime, AdminNote, employee level snapshot, employee default rate snapshot, project rate snapshot and calculated value.
+
+Project billing values, payments, contract periods, project economics, customer reports, overtime administration and settings remain Admin-only. Project detail read models also hide billing fields, approved-hour summaries and team member levels from non-admin responses.
+
+## Leave Request Authorization
+
+Backend services are the authorization boundary for leave and permission flows:
+
+- `LeaveRequest/GetLeaveRequests` scopes non-admin users to `WorkLogUserContext.EmployeeId`, regardless of a missing or spoofed `EmployeeId` query parameter.
+- Employee users can create only their own Vacation/Permission requests from My Day.
+- Admin users can create for another active employee through the service contract, but the My Day UI defaults to the Admin user's linked employee profile and is not a broad admin leave-entry screen.
+- Missing or inactive employees are rejected.
+- Leave hours must be positive and use 0.5 hour increments.
+- `LeaveRequest/ApproveLeaveRequest` and `LeaveRequest/RejectLeaveRequest` are Admin-only at controller policy level and guarded again in `LeaveRequestService`.
+- `TimeCompletenessService` counts only approved leave. Pending and rejected leave does not contribute to daily completeness.
+
+## Overtime and Completeness Authorization
+
+Overtime approval and operational completeness review are Admin workflows:
+
+- `OvertimeRequest/GetOvertimeRequests`, `GetOvertimeRequest`, `ApproveOvertimeRequest` and `RejectOvertimeRequest` are Admin-only at controller policy level and guarded again in `OvertimeRequestService`.
+- Employee users cannot list all overtime requests and cannot approve/reject overtime.
+- Overtime detail can include same-day TimeEntries for Admin review.
+- Approving overtime stores approved hours and marks the request Approved; rejecting overtime sets approved hours to 0 and marks the request Rejected.
+- `TimeCompleteness/GetTimeCompleteness` is authenticated because My Day consumes it, but `TimeCompletenessService` scopes non-admin users to `WorkLogUserContext.EmployeeId`.
+- The Time Completeness page is Admin-only in routing. My Day remains the employee-facing daily completeness view.
+- The backend service, not the frontend, owns expected hours, worked hours, approved leave, missing hours and overtime status.
+
 ## Pending
 
 - Customer portal pages.

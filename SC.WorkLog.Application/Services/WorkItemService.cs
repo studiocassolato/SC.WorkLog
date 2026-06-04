@@ -55,6 +55,7 @@ namespace SC.WorkLog.Application.Services
             var workItems = await _workItems.Get(x => (!filter.ProjectId.HasValue || x.ProjectId == filter.ProjectId.Value)
                 && (!filter.CustomerId.HasValue || projectIdsForCustomer.Contains(x.ProjectId))
                 && (!filter.AssigneeId.HasValue || x.AssigneeId == filter.AssigneeId.Value)
+                && (!filter.UnassignedOnly || !x.AssigneeId.HasValue)
                 && (statusKey == null || x.StatusKey == statusKey)
                 && (!filter.StatusTypology.HasValue || statusTypologyKeys.Contains(x.StatusKey))
                 && (!filter.Priority.HasValue || x.Priority == filter.Priority.Value)
@@ -107,15 +108,21 @@ namespace SC.WorkLog.Application.Services
             WorkLogApplicationValidation.Required(request.ProjectId, nameof(request.ProjectId));
             WorkLogApplicationValidation.Required(request.Title, nameof(request.Title));
             var workItem = await GetWorkItemOrThrow(request.Id);
-            if (workItem.ProjectId != request.ProjectId)
-                throw new ArgumentException("Work item project cannot be changed.");
+            var project = await _projects.GetSingleOrDefaultAsync(x => x.Id == request.ProjectId);
+            if (project == null)
+                throw new ArgumentException("Project not found.");
+            var projectChanged = workItem.ProjectId != request.ProjectId;
             if (request.AssigneeId.HasValue)
                 await EnsureEmployeeExists(request.AssigneeId.Value);
             var statusConfig = await ResolveRequestStatusConfig(request.StatusKey);
 
+            if (projectChanged)
+                workItem.MoveToProject(request.ProjectId, CurrentUser(userContext));
             workItem.UpdateDetails(request.Title, request.Description, request.Priority, request.AssigneeId, request.IsPriority, CurrentUser(userContext));
             workItem.ChangeStatus(statusConfig.Key, statusConfig.IsClosed() ? request.ClosingDate.GetValueOrDefault(DateTime.UtcNow) : null, CurrentUser(userContext));
             await _workItems.InsertOrReplace(workItem);
+            if (projectChanged)
+                await SyncTimeEntriesProjectAsync(workItem.Id, request.ProjectId);
             return await GetWorkItemDetailAsync(workItem.Id, userContext);
         }
 
@@ -231,6 +238,11 @@ namespace SC.WorkLog.Application.Services
             if (workItem == null)
                 throw new ArgumentException("Work item not found.");
             return workItem;
+        }
+
+        private async Task SyncTimeEntriesProjectAsync(Guid workItemId, Guid projectId)
+        {
+            await _timeEntries.UpdateManyField(x => x.WorkItemId == workItemId && x.ProjectId != projectId, x => x.ProjectId, projectId);
         }
 
         private async Task EnsureEmployeeExists(Guid employeeId)

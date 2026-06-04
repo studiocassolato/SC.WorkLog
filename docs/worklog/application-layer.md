@@ -44,7 +44,7 @@ Application DTOs are grouped directly under `SC.WorkLog.Application/DTO`:
 - `StatusConfigs`: configurable Work Item statuses grouped by `WorkItemStatusTypology`.
 - `Common`: application user context and role placeholders.
 
-Admin-only values such as approved time, rates, economic amounts, calculated values and report totals are represented only in DTOs intended for admin-capable views. Connected API endpoints must enforce server-side authorization and must not rely on the frontend demo role switcher.
+Admin-only values such as approved time, rates, employee level snapshots, economic amounts, calculated values and report totals are represented only in DTOs intended for admin-capable views or are returned as null/zero for non-admin mappings. Connected API endpoints must enforce server-side authorization and must not rely on frontend hiding or the frontend demo role switcher.
 
 ## Implemented validation
 
@@ -70,16 +70,16 @@ The current services now enforce and orchestrate the initial backend-owned rules
 - `ProjectService`: list/search, detail composition, create/update, capabilities, milestones, payments, contract periods and overlap prevention.
 - `WorkItemService`: list/filter, detail, Admin-only create/update and comment creation using the server-side current employee as author.
 - `StatusConfigService`: configurable Work Item statuses, default status provisioning by stable key, unique keys/names, active New/closed invariants and computed closed/open behavior.
-- `TimeEntryService`: list/filter, create/update, approved-time update, backend snapshots and overtime request creation/update.
-- `LeaveRequestService`: list/filter, create, approve and reject.
-- `OvertimeRequestService`: list/filter, detail, approve and reject with day time entries for review.
+- `TimeEntryService`: list/filter, create/update, approved-time update, backend snapshots, denormalized `ProjectId` consistency and overtime request creation/update.
+- `LeaveRequestService`: list/filter, create, approve and reject, with employee self-scoping for non-admin reads, self-or-admin creation checks, active employee validation, positive 0.5-increment hours and Admin-only approval/rejection.
+- `OvertimeRequestService`: Admin-only list/filter, detail, approve and reject with day time entries for review.
 - `ProjectReportService`: repository-backed project/customer reports and economics orchestration through domain calculators.
-- `TimeCompletenessService`: repository-backed date range completeness using active employees, time entries, approved leave and overtime requests.
+- `TimeCompletenessService`: repository-backed date range completeness using active employees, time entries, approved leave and overtime requests. Pending and rejected leave requests do not contribute to leave hours.
 - `WorkLogUserService`: repository-backed application user management and authenticated user resolution. The frontend uses these endpoints behind Settings Employees/Customers rather than exposing a separate Users page.
 
-Economic data, approved time updates, customer reports, user management, overtime administration and work item create/update require Admin role checks at the application layer.
+Economic data, approved time updates, customer reports, user management, overtime administration and work item create/update require Admin role checks at the application layer. Time completeness can be consumed by employee-facing My Day, but `TimeCompletenessService` scopes non-admin users to `WorkLogUserContext.EmployeeId`.
 
-The frontend Projects list and base Project Detail consume `ProjectService` read models. Admin Project create/update now calls `ProjectService.CreateProjectAsync` and `ProjectService.UpdateProjectAsync` for customer, name, payment type, status, notes and base payment-type fields. Project Detail Economics consumes `ProjectReportService.GetProjectEconomicsAsync` through `Project/GetProjectEconomics`; the frontend formats returned values but does not recompute authoritative economics. Project Payments consumes `ProjectService.GetProjectPaymentsAsync`, `CreateProjectPaymentAsync`, `UpdateProjectPaymentAsync` and `DeleteProjectPaymentAsync` through the Project payment endpoints for Time & material projects only. Project Contract Periods consumes `ProjectService.GetProjectContractPeriodsAsync`, `CreateProjectContractPeriodAsync`, `UpdateProjectContractPeriodAsync` and `DeleteProjectContractPeriodAsync` through the Project contract period endpoints for Annual retainer projects only. Project Milestones consume `ProjectService` create/update/delete milestone methods and require selected-project ownership for update/delete. The Project Detail Work Items tab consumes `WorkItemService.GetWorkItemsAsync` through `WorkItem/GetWorkItems` filtered by `ProjectId`, and Work Item Detail consumes `WorkItemService.GetWorkItemDetailAsync` through `WorkItem/GetWorkItem` in read-only mode. Work Item create/update/status-change, comments retrieval UI and time entry rows remain separate integration work.
+The frontend Projects list and base Project Detail consume `ProjectService` read models. Admin Project create/update now calls `ProjectService.CreateProjectAsync` and `ProjectService.UpdateProjectAsync` for customer, name, payment type, status, notes and base payment-type fields. Project Detail Economics consumes `ProjectReportService.GetProjectEconomicsAsync` through `Project/GetProjectEconomics`; the frontend formats returned values but does not recompute authoritative economics. Project Payments consumes `ProjectService.GetProjectPaymentsAsync`, `CreateProjectPaymentAsync`, `UpdateProjectPaymentAsync` and `DeleteProjectPaymentAsync` through the Project payment endpoints for Time & material projects only. Project Contract Periods consumes `ProjectService.GetProjectContractPeriodsAsync`, `CreateProjectContractPeriodAsync`, `UpdateProjectContractPeriodAsync` and `DeleteProjectContractPeriodAsync` through the Project contract period endpoints for Annual retainer projects only. Project Milestones consume `ProjectService` create/update/delete milestone methods and require selected-project ownership for update/delete. The Project Detail Work Items tab and global Work Items page consume `WorkItemService.GetWorkItemsAsync` through `WorkItem/GetWorkItems`; the global page uses backend filters for search text, project, customer, assignee, unassigned-only, status key, priority and include-closed behavior. Project Detail Time Entries, global Time Entries and My Day consume `TimeEntryService.GetTimeEntriesAsync` through `TimeEntry/GetTimeEntries` with ProjectId/date/employee/customer/status filtering as applicable. Add Time uses `TimeEntryService.CreateTimeEntryAsync` through `TimeEntry/CreateTimeEntry`; TimeEntry row edits use `TimeEntryService.UpdateTimeEntryAsync` through `TimeEntry/UpdateTimeEntry`; Admin ApprovedTime edits use `TimeEntryService.UpdateApprovedTimeAsync` through `TimeEntry/UpdateApprovedTime`. My Day uses `LeaveRequestService.GetLeaveRequestsAsync` for selected-date leave previews, `LeaveRequestService.CreateLeaveRequestAsync` for employee leave/permission creation, and `TimeCompletenessService.GetTimeCompletenessAsync` for backend-owned expected/worked/approved-leave/missing/overtime summary. Approvals uses `LeaveRequestService.GetLeaveRequestsAsync`, `ApproveLeaveRequestAsync`, `RejectLeaveRequestAsync`, `OvertimeRequestService.GetOvertimeRequestsAsync`, `GetOvertimeRequestDetailAsync`, `ApproveOvertimeRequestAsync` and `RejectOvertimeRequestAsync` for Admin approval workflows. Time Completeness uses `TimeCompletenessService.GetTimeCompletenessAsync` and does not recompute authoritative daily totals in the frontend. Work Item Detail consumes `WorkItemService.GetWorkItemDetailAsync` through `WorkItem/GetWorkItem`. Admin Work Item create/update/status-change uses `WorkItemService.CreateWorkItemAsync` and `WorkItemService.UpdateWorkItemAsync` through `WorkItem/CreateWorkItem` and `WorkItem/UpdateWorkItem`. Status changes are represented by updating `StatusKey`; assignee changes can set an active employee or null; project changes are allowed for Admin users.
 
 Work item comments do not accept a frontend-owned author id. `AddComment` uses `WorkLogUserContext.EmployeeId`, validates the linked active employee, validates the target work item and requires comment content.
 
@@ -87,11 +87,13 @@ Work Item statuses are represented by `StatusConfig` records. `StatusConfig.Id` 
 
 Default Work Item statuses are initialized through an explicit ConsoleTester command, `EnsureDefaultStatuses`. The command delegates to `StatusConfigService`, matches defaults by `Key`, creates missing default keys, does not overwrite customized existing status records and validates active `New` plus active closed typology invariants.
 
+`TimeEntry` stores both `WorkItemId` and a denormalized `ProjectId`. `WorkItemId` remains the main functional relation to the ticket/activity, while `ProjectId` is owned by the backend and copied from `WorkItem.ProjectId` when time is created. `CreateTimeEntryRequest` and `UpdateTimeEntryRequest` do not accept `ProjectId`, `ApprovedTime`, rates or snapshots from the frontend. `UpdateTimeEntryRequest` may carry a new `WorkItemId`; when it changes, `TimeEntryService.UpdateTimeEntryAsync` loads the new WorkItem/Project, updates backend-owned `ProjectId`, and refreshes the project-rate snapshot from the current project and stored employee level snapshot. `TimeEntryService.UpdateApprovedTimeAsync` is the only ApprovedTime write path and requires Admin. `TimeEntryService.GetTimeEntriesAsync` scopes non-admin users to `WorkLogUserContext.EmployeeId` even when the request omits or spoofs `EmployeeId`. Non-admin TimeEntry DTOs return null for ApprovedTime, AdminNote, employee level snapshot, employee default rate snapshot, project rate snapshot and calculated value. If an updated legacy time entry has an inconsistent `ProjectId`, update resynchronizes it from the current WorkItem. `WorkItemService.UpdateWorkItemAsync` supports moving a WorkItem to another Project and bulk-updates all related `TimeEntry.ProjectId` records after saving the WorkItem. There is no Unit of Work yet, so this multi-document update should later be protected by a MongoDB transaction or a compensating repair task.
+
 ## Calculation orchestration
 
 The application layer does not duplicate domain calculation logic.
 
-`ProjectReportService` maps domain calculator results into application DTOs for:
+`ProjectReportService` loads project economics and customer report time rows by `TimeEntry.ProjectId` where possible, then keeps `WorkItemId` for Work Item-specific labels and rows. It maps domain calculator results into application DTOs for:
 
 - Time & material economics;
 - Fixed price economics;
@@ -104,7 +106,7 @@ The application layer does not duplicate domain calculation logic.
 
 Application services use the generic `IRepository<TEntity>` predicate support to load scoped data for list, detail and report operations.
 
-Large collections such as `TimeEntry`, `WorkItem`, `ProjectPayment`, `ProjectContractPeriod`, `LeaveRequest`, `OvertimeRequest` and `WorkItemComment` should not be read with full collection scans for normal list/detail/report flows. Services should first identify relevant ids, then query by those ids or by date/status filters.
+Large collections such as `TimeEntry`, `WorkItem`, `ProjectPayment`, `ProjectContractPeriod`, `LeaveRequest`, `OvertimeRequest` and `WorkItemComment` should not be read with full collection scans for normal list/detail/report flows. Services should first identify relevant ids, then query by those ids or by date/status filters. Project/report/economics time-entry queries should prefer denormalized `TimeEntry.ProjectId`; Work Item-specific views should continue using `WorkItemId`.
 
 Mapping methods should stay pure and must not perform repository calls. Data-loading/composition methods should load the needed entities in batches, build dictionaries or groupings, and then call pure mapping helpers.
 
@@ -116,10 +118,9 @@ The following items are intentionally pending:
 
 - customer portal enablement and customer-specific authorization;
 - project/customer visibility checks backed by persisted user permissions;
-- final overtime/completeness workflow side effects after leave changes;
 - export/report delivery mechanisms;
-- incremental replacement of remaining frontend mock pages: Dashboard, global Work Items, Time Entries, My Day, Approvals, Reports and Time Completeness.
-- Work Item write flows and comments retrieval UI.
+- incremental replacement of remaining frontend mock pages: Dashboard and Reports.
+- Work Item comments retrieval UI.
 - transaction handling or compensating workflow for multi-step Settings saves.
 - pagination for WorkLogUser admin queries.
 - optional minimal company profile/report branding if product flow needs it later.

@@ -36,7 +36,7 @@ internal static class WorkLogCalculatorTestFactory
 
     public static TimeEntry TimeEntry(Employee employee, WorkItem workItem, DateTime date, decimal time, decimal approvedTime, decimal defaultRate = 50m, decimal projectRate = 100m)
     {
-        return new TimeEntry(employee.Id, workItem.Id, date, time, approvedTime, "Work", null, RequestStatus.PendingApproval, null, employee.Level, defaultRate, projectRate, CurrentUser);
+        return new TimeEntry(employee.Id, workItem.Id, workItem.ProjectId, date, time, approvedTime, "Work", null, RequestStatus.PendingApproval, null, employee.Level, defaultRate, projectRate, CurrentUser);
     }
 
     public static ProjectPayment ProjectPayment(Project project, DateTime paymentDate, decimal amount)

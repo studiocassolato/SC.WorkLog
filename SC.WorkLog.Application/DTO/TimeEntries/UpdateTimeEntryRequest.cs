@@ -6,6 +6,7 @@ namespace SC.WorkLog.Application.DTO.TimeEntries
     public class UpdateTimeEntryRequest
     {
         public Guid Id { get; set; }
+        public Guid WorkItemId { get; set; }
         public DateTime Date { get; set; }
         public decimal Time { get; set; }
         public string Description { get; set; }

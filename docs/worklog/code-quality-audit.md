@@ -27,7 +27,7 @@ Initial baseline before cleanup:
 Final validation after cleanup:
 
 - `dotnet build SC.WorkLog.sln`: passed, 0 warnings.
-- `dotnet test SC.WorkLog.sln --no-build`: passed, 130 tests.
+- `dotnet test SC.WorkLog.sln --no-build`: passed, 169 tests.
 - `npm run build`: passed.
 - `npm run lint`: passed.
 
@@ -51,7 +51,7 @@ The only small controller/service coupling found was Project payment/contract-pe
 
 ## 4. Application Service Findings
 
-Application services generally keep mapping helpers pure and perform composition with scoped queries, dictionaries and groupings. The important Project and WorkItem list/detail paths avoid repeated per-item repository calls for related projects, customers, employees, statuses and time entries.
+Application services generally keep mapping helpers pure and perform composition with scoped queries, dictionaries and groupings. The important Project and WorkItem list/detail paths avoid repeated per-item repository calls for related projects, customers, employees, statuses and time entries. TimeEntry now stores backend-owned denormalized `ProjectId`, so project detail, project economics and customer report time queries can avoid first resolving all project WorkItem ids.
 
 Issues fixed:
 
@@ -95,14 +95,23 @@ The Project area respects the intended API-backed scope:
 - Project Payments and Project Contract Periods are Admin-only, payment-type-specific and backend-backed for list/create/update/delete.
 - Project Milestones list/write flows use backend project data/endpoints.
 - Project Detail Work Items tab uses `WorkItem/GetWorkItems` filtered by `projectId` and `includeClosed=true`.
+- Project Detail Time Entries tab uses `TimeEntry/GetTimeEntries` filtered by `projectId`.
+- Global Time Entries, Add Time, normal TimeEntry update and Admin ApprovedTime use `TimeEntry/GetTimeEntries`, `TimeEntry/CreateTimeEntry`, `TimeEntry/UpdateTimeEntry` and `TimeEntry/UpdateApprovedTime`.
+- My Day uses `TimeEntry/GetTimeEntries`, `LeaveRequest/GetLeaveRequests`, `LeaveRequest/CreateLeaveRequest`, assigned Work Items from `WorkItem/GetWorkItems`, and `TimeCompleteness/GetTimeCompleteness` for backend-owned daily summary.
+- Approvals uses `LeaveRequest/GetLeaveRequests`, `LeaveRequest/ApproveLeaveRequest`, `LeaveRequest/RejectLeaveRequest`, `OvertimeRequest/GetOvertimeRequests`, `OvertimeRequest/GetOvertimeRequest`, `OvertimeRequest/ApproveOvertimeRequest` and `OvertimeRequest/RejectOvertimeRequest` for leave/permission and overtime approval workflows.
+- Time Completeness uses `TimeCompleteness/GetTimeCompleteness` for backend-owned expected, worked, approved leave, missing and overtime status values.
+- TimeEntry and Project detail DTO mappings hide ApprovedTime, AdminNote, employee level snapshots, rate snapshots, calculated values and billing fields from non-admin responses at the backend layer.
 - Work Item row/card navigation opens the API-backed Work Item Detail route, which loads read-only data through `WorkItem/GetWorkItem`.
+- Global Work Items uses `WorkItem/GetWorkItems` with backend filters for search, project, customer, assignee, unassigned-only, status key, priority and include-closed.
+- Work Item create/update/status-change uses `WorkItem/CreateWorkItem` and `WorkItem/UpdateWorkItem` for Admin users. Status selection comes from active `StatusConfig` records, assignees come from active Employees, and successful saves reload the API-backed list/detail.
+- Work Item project moves synchronize related `TimeEntry.ProjectId` records with a generic repository bulk field update. This should still be revisited for MongoDB transactions or compensating repair before high-consistency production use.
 
 No fallback to mock project/payment/contract-period/milestone data was found in API-backed Project Detail.
 
 Pending Project-adjacent items:
 
-- Project Time Entries tab remains pending.
-- Global Work Items and Work Item write/comment flows are still separate integration work.
+- Work Item comments retrieval/write UI remains separate integration work.
+- Work Item list pagination and origin filtering are still pending.
 - Project list/search pagination remains pending.
 
 ## 7. Auth/Security Findings
@@ -139,15 +148,21 @@ API-backed:
 - Project Contract Periods;
 - Project Milestones;
 - Project Detail Work Items tab;
-- Work Item Detail read-only.
+- Project Detail Time Entries tab;
+- global Work Items;
+- Work Item Detail create/update/status-change;
+- global Time Entries;
+- Add Time/create TimeEntry UI;
+- My Day;
+- Leave request creation and approvals;
+- Overtime approvals;
+- Time Completeness;
+- TimeEntry update;
+- Admin ApprovedTime editing.
 
 Mock-only/pending:
 
-- global Work Items page;
 - Work Item comments retrieval UI;
-- Time Entries;
-- My Day;
-- Approvals;
 - Reports;
 - Dashboard.
 
@@ -176,9 +191,10 @@ Mock data should remain for the pending pages. Removing it now would break pages
 - Potential extraction of large `ProjectDetail` and `Settings` sections into smaller components.
 - Frontend bundle code splitting/lazy routes.
 - MongoDB data migration from legacy WorkItem status fields to `StatusKey`.
+- MongoDB data migration for existing TimeEntry records without denormalized `ProjectId`.
 - Customer portal and customer-specific visibility rules.
-- Global Work Items/Time Entries API integration.
-- Work Item create/update/status-change and comments retrieval UI.
+- Reports/Dashboard TimeEntry consumers still use mock data or pending UI.
+- Work Item comments retrieval UI.
 - Transaction or compensating strategy for multi-step Settings saves.
 
 ## 11. Recommended Next Steps Before Work Items
@@ -187,7 +203,7 @@ No additional cleanup is required before starting the next Work Items phase.
 
 Recommended order:
 
-1. Connect global Work Items list with backend filtering and no mock fallback.
-2. Add Work Item create/update/status-change flows with Admin guards and `StatusKey` validation.
-3. Add comments retrieval UI if a `GetComments` endpoint is introduced.
-4. Defer Time Entries until Work Item read/write paths are stable.
+1. Add comments retrieval UI after the Jira/comment sync strategy is decided.
+2. Add pagination/origin filtering to `WorkItem/GetWorkItems` before larger datasets.
+3. Add Project Detail Add Work Item shortcut if product flow needs project-context creation.
+4. Continue mock-data replacement with Reports or Dashboard after the approval/completeness flows stabilize.

@@ -12,13 +12,8 @@ namespace SC.WorkLog.Domain.DomainServices
             if (project == null)
                 throw new ArgumentException("Project is required.");
 
-            var projectWorkItemIds = (workItems ?? Enumerable.Empty<WorkItem>())
-                .Where(x => x.ProjectId == project.Id)
-                .Select(x => x.Id)
-                .ToHashSet();
-
             return (timeEntries ?? Enumerable.Empty<TimeEntry>())
-                .Where(x => projectWorkItemIds.Contains(x.WorkItemId))
+                .Where(x => x.ProjectId == project.Id)
                 .ToList();
         }
 

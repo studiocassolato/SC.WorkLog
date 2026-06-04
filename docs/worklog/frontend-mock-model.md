@@ -6,11 +6,11 @@ The current WorkLog frontend is a Vite/React mock application imported from the 
 
 Most business page data is still local mock data from `src/lib/mock-data.ts`. Runtime state and create/update actions for those mock-only pages are kept only in React state through `src/lib/worklog-context.tsx`.
 
-Cognito authentication and backend current-user resolution are now implemented for the application shell. The frontend calls `/api/Auth/Me` after login and uses the backend `WorkLogUser` role/profile for route and navigation visibility. Settings Statuses, Employees and Customers are API-backed. Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, the Project Detail Work Items tab and Work Item Detail read-only are API-backed. The global Work Items page, time entry pages, dashboard, reports, approvals and completeness remain mock-only until later API integration phases.
+Cognito authentication and backend current-user resolution are now implemented for the application shell. The frontend calls `/api/Auth/Me` after login and uses the backend `WorkLogUser` role/profile for route and navigation visibility. Settings Statuses, Employees and Customers are API-backed. Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, the Project Detail Work Items tab, Project Detail Time Entries tab, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals and Time Completeness are API-backed. Dashboard and reports remain mock-only until later API integration phases.
 
 Settings currently includes Statuses, Customers and Employees. Company Settings is removed from the current WorkLog scope; expected daily hours are stored per Employee, and leave/permission/overtime approvals are handled by admin workflows.
 
-Settings Statuses is API-backed. Business Work Item pages still use local mock WorkItem rows, but their mock `StatusConfig` shape mirrors the backend: stable key, free status name, fixed typology, customer display name, active flag and order. Mock Work Items store `statusKey`, not the editable status name. Closed/open behavior is derived from typology, and the default initial status is the first active `New` typology by order.
+Settings Statuses is API-backed. Mock-only pages still use local mock WorkItem rows, but their mock `StatusConfig` shape mirrors the backend: stable key, free status name, fixed typology, customer display name, active flag and order. Mock Work Items store `statusKey`, not the editable status name. Closed/open behavior is derived from typology, and the default initial status is the first active `New` typology by order.
 
 This document describes the model and UI behavior that exists today in the frontend. It is intended as a reference for future backend, API, persistence, and security implementation.
 
@@ -60,7 +60,7 @@ This document describes the model and UI behavior that exists today in the front
 | `milestones` | `ProjectMilestone[]` | Project milestones. | Shown in Project Detail. |
 | `createdAt` | `string?` | Project creation date. | Optional mock field. |
 
-Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods and Project Milestones no longer use this mock Project model directly. Mock Project records remain in place because Dashboard, the global Work Items page, Time Entries, reports and other mock-only pages still reference them.
+Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, Project Detail Time Entries, Add Time, global Time Entries and My Day no longer use this mock Project model directly. Mock Project records remain in place because Dashboard, reports and other mock-only pages still reference them.
 
 ### ProjectMilestone
 
@@ -91,7 +91,7 @@ For API-backed Project Detail, milestones are loaded from `Project/GetProject` a
 | `closingDate` | `string \| null` | Closing date. | `null` means not closed by date. |
 | `isPriority` | `boolean?` | Priority marker for assignee. | Optional extra flag. |
 
-The Project Detail Work Items tab and Work Item Detail route no longer use this mock WorkItem model. Project Detail reads backend Work Item DTOs filtered by `ProjectId`, and Work Item Detail reads one backend Work Item DTO by id through `WorkItem/GetWorkItem`. The global Work Items page still uses mock WorkItems, so mock ids that do not exist in the backend show the API-backed not-found state on the detail route.
+The Project Detail Work Items tab, global Work Items page, Work Item Detail route, Add Time dialog, global Time Entries page and My Day no longer use this mock WorkItem model. Project Detail reads backend Work Item DTOs filtered by `ProjectId`, global Work Items, My Day and Add Time read backend Work Item DTOs through `WorkItem/GetWorkItems`, and Work Item Detail reads one backend Work Item DTO by id through `WorkItem/GetWorkItem`. Admin create/update/status-change uses backend `WorkItem/CreateWorkItem` and `WorkItem/UpdateWorkItem`, with `StatusKey` selected from active `StatusConfig` records and assignees selected from active Employees. Mock WorkItems remain for Dashboard, reports and other mock-only pages.
 
 ### TimeEntry
 
@@ -100,6 +100,7 @@ The Project Detail Work Items tab and Work Item Detail route no longer use this 
 | `id` | `string` | Time entry identifier. | Mock ids use `te-*`. |
 | `employeeId` | `string` | Employee who entered time. | Admin can enter for another employee in the Add Time dialog. |
 | `workItemId` | `string` | Linked work item id. | Required by the Add Time dialog. |
+| `projectId` | `string?` | Denormalized owning project id in the backend model. | Backend-owned copy of `WorkItem.projectId` for project/report queries. Frontend create/update requests submit `workItemId`, not authoritative `projectId`. Mock TimeEntry rows may still derive project through WorkItem for Dashboard, reports and other mock-only pages. |
 | `date` | `string` | Entry date. | Used for reports, completeness, and contract period assignment. |
 | `time` | `number` | Hours logged by employee. | Entered in 0.5 hour increments in the UI. |
 | `approvedTime` | `number` | Hours approved by admin. | Used for economics and admin views. Hidden from Employee views. |
@@ -150,8 +151,10 @@ For API-backed Project Detail, the Contract Periods tab now reads, creates, upda
 | `hours` | `number` | Requested hours. | Vacation and permission are hour-based. |
 | `status` | `RequestStatus` | Approval status. | Pending, approved, or rejected. |
 | `requestDate` | `string` | Date the request was created. | Mock audit field. |
-| `employeeNote` | `string` | Employee request note. | Submitted from Leave Request dialog. |
-| `adminNote` | `string \| null` | Admin response note. | Set to simple mock values in Approvals. |
+| `employeeNote` | `string` | Employee request note. | Submitted from the API-backed My Day leave request form. |
+| `adminNote` | `string \| null` | Admin response note. | Set through the API-backed leave approval dialog. |
+
+My Day creates leave requests through `LeaveRequest/CreateLeaveRequest`, lists selected-day requests through `LeaveRequest/GetLeaveRequests`, and reloads `TimeCompleteness/GetTimeCompleteness` after saves. Approvals uses backend leave and overtime requests plus approve/reject endpoints. Mock leave request records remain because Dashboard, Reports and other still-mock pages may reference them.
 
 ### OvertimeRequest
 
@@ -249,7 +252,7 @@ Work item status names are configurable. The current default keys are `new`, `in
 - A `Project` belongs to a `Customer` through `Project.customerId`.
 - A `WorkItem` belongs to a `Project` through `WorkItem.projectId`.
 - A `TimeEntry` belongs to a `WorkItem` through `TimeEntry.workItemId`.
-- A `TimeEntry` is indirectly linked to a `Project` through `TimeEntry.workItemId -> WorkItem.projectId`.
+- In the backend model, a `TimeEntry` also stores denormalized `projectId` copied from `WorkItem.projectId` for faster project/report queries. The backend owns consistency; frontend requests should not provide authoritative `projectId`.
 - A `ProjectPayment` belongs to a `Project` through `ProjectPayment.projectId`.
 - A `ProjectContractPeriod` belongs to a `Project` through `ProjectContractPeriod.projectId`.
 - A `LeaveRequest` belongs to an `Employee` through `LeaveRequest.employeeId`.
@@ -268,7 +271,7 @@ Time & material projects use project-specific rates by employee level:
 - `midRate`
 - `seniorRate`
 
-When a `TimeEntry` is created, the frontend stores a `projectRateSnapshot`. Worked value uses `approvedTime`, not raw logged `time`.
+In API-backed Add Time, the backend stores `projectRateSnapshot`; mock-only pages may still use the mock snapshot field. Worked value uses `approvedTime`, not raw logged `time`.
 
 `ProjectPayment` records represent payments received for a Time & material project. Payment history and balance are shown in the `Payments` tab.
 
@@ -334,20 +337,20 @@ Employee users do not see internal economic values.
 
 ## 6. Time tracking rules
 
-- Time is entered by employees through the Add Time dialog.
-- Admin users can also enter time for another employee.
+- Time is entered by employees through the API-backed Add Time dialog.
+- Admin users can also enter time for another employee. The dialog loads active employees from `Employee/GetActiveEmployees`; Employee users use their backend current employee and cannot select another employee.
 - `approvedTime` is admin-only information.
 - Economic calculations use `approvedTime`.
 - Employee users must not see `approvedTime`.
 - Time entries must always be linked to a `WorkItem`; the Add Time action is disabled until a work item is selected.
 - Closed work items can still receive time if the user enables `Include closed` in the Add Time dialog.
-- Closed projects are not explicitly blocked by the current Add Time code; if their work items are selectable, time can be entered. To verify before backend implementation.
+- Closed projects are not explicitly blocked by the current Add Time code; if their work items are selectable through the backend WorkItem filter, time can be entered. To verify before final product policy.
 - Time is entered in 0.5 hour increments. The Add Time dialog uses half-hour options.
-- Employees can modify entries only until the day after the entry date: To verify. The current UI shows edit affordances, but this rule is not clearly enforced in the inspected frontend code.
+- Employees can modify entries only until the day after the entry date. This is enforced by `TimeEntryService`; the frontend shows backend validation errors.
 
 ## 7. Vacation, permissions and overtime
 
-Vacation and permission requests are hour-based `LeaveRequest` records. They are submitted from the Leave Request dialog and approved or rejected in the Approvals page.
+Vacation and permission requests are hour-based `LeaveRequest` records. API-backed My Day creates and previews them through backend LeaveRequest APIs. The Approvals page approves or rejects backend leave requests through Admin-only endpoints. Mock leave records remain only for Dashboard, Reports and other still-mock consumers.
 
 Approval statuses:
 
@@ -370,9 +373,8 @@ Current frontend behavior:
 - If total is below expected hours, status becomes `Missing hours`.
 - If total is above expected hours and overtime is approved, status becomes `Overtime approved`.
 - If total is above expected hours and overtime is not approved, status becomes `Overtime pending`.
-- When adding a time entry pushes an employee above `expectedDailyHours`, the mock context creates or updates an `OvertimeRequest` for that employee/date.
-- Approving overtime sets `approvedHours` to `calculatedHours`.
-- Rejecting overtime sets `approvedHours` to `0`.
+- In API-backed flows, `TimeEntryService` creates or updates pending `OvertimeRequest` records when daily total exceeds `expectedDailyHours`.
+- The Approvals page loads those backend overtime requests and calls backend approve/reject endpoints; mock overtime records remain for Dashboard/Reports only.
 
 ## 8. Role visibility rules
 
@@ -418,10 +420,10 @@ Current implementation notes:
 
 ### My Day
 
-- Purpose: Employee daily workspace for today's time, leave, expected hours, and overtime status.
-- Main data used: current user, time entries, work items, projects, leave requests, overtime requests.
-- Main actions: Add Time, Request Leave, navigate/edit from listed entries.
-- Visibility: Admin and Employee.
+- Purpose: API-backed employee daily workspace for selected-day time, leave preview, expected hours, and overtime/missing-hours status.
+- Main data used: backend current user, `TimeEntry/GetTimeEntries`, `LeaveRequest/GetLeaveRequests`, assigned Work Items from `WorkItem/GetWorkItems`, and `TimeCompleteness/GetTimeCompleteness`.
+- Main actions: Add Time through the API-backed dialog, create Vacation/Permission requests through `LeaveRequest/CreateLeaveRequest`, and navigate selected date. TimeEntry edit in My Day is pending.
+- Visibility: Admin and Employee. Admin sees their own linked employee profile rather than a full admin completeness page.
 
 ### Projects
 
@@ -435,41 +437,45 @@ Current implementation notes:
 - Purpose: Detailed project page with overview, work items, time entries, milestones, and economics.
 - Main data used: backend project detail, customer, milestones, project work items, economics, payments and contract periods.
 - Main actions: view API-backed overview/economics/work items, create/update/delete milestones, create/update/delete Time & material payments, create/update/delete Annual retainer contract periods, and edit base project fields.
-- Visibility: Admin and Employee can view allowed project detail data; economics, payments, contract periods, billing values and write actions are Admin-only. The Time Entries tab remains an API integration pending state.
+- Visibility: Admin and Employee can view allowed project detail data; economics, payments, contract periods, billing values and write actions are Admin-only. The Time Entries tab is API-backed; editing is handled from global Time Entries in this phase.
 
 ### Work Items
 
-- Purpose: Work item list with filters and responsive desktop/mobile presentation.
-- Main data used: work items, projects, customers, employees, time entries.
-- Main actions: filter/search work items, open detail, create work item, add time.
-- Visibility: Admin and Employee.
+- Purpose: API-backed work item list with filters and responsive desktop/mobile presentation.
+- Main data used: backend Work Item list DTOs from `WorkItem/GetWorkItems`, plus backend project/status reference data for filter labels.
+- Main actions: filter/search work items, open the API-backed detail route and create Work Items as Admin. Comments remain pending.
+- Visibility: Admin and Employee. Approved hours are shown only when returned by the backend for Admin users.
 
 ### Work Item Detail
 
-- Purpose: Read-only API-backed work item view with status, priority, metadata and logged/approved hour summary.
+- Purpose: API-backed work item view with status, priority, metadata and logged/approved hour summary.
 - Main data used: backend Work Item detail DTO from `WorkItem/GetWorkItem`.
-- Main actions: review metadata. Status change, edit, assign/unassign and comments retrieval/write UI remain pending.
+- Main actions: review metadata and update editable Work Item fields as Admin, including status, priority and assignment. Comments retrieval/write UI remains pending.
 - Visibility: Admin and Employee. Approved hours are shown only when returned by the backend for Admin users.
 
 ### Time Entries
 
 - Purpose: Time entry list and admin approval/edit view.
-- Main data used: time entries, employees, work items, projects, customers.
-- Main actions: filter time entries, export data, edit approved time as Admin.
+- Main data used: backend time entries, active employees for Admin filters, backend projects/customers and backend Work Items for edits.
+- Main actions: filter time entries through backend filters, edit logged time/WorkItem/date/notes through `TimeEntry/UpdateTimeEntry`, and edit ApprovedTime as Admin through `TimeEntry/UpdateApprovedTime`.
 - Visibility: Admin and Employee, with Admin-only employee filters, approved time, values, and edit controls.
+
+Project Detail Time Entries, global Time Entries, My Day and Time Completeness now read backend rows or backend summaries through API endpoints. Add Time creates backend records through `TimeEntry/CreateTimeEntry`. Mock TimeEntry rows remain for Dashboard and reports until those pages are integrated.
+
+For API-backed TimeEntry flows, Employee users receive backend DTOs scoped to their own `EmployeeId`. ApprovedTime, AdminNote, employee level snapshot, employee default rate snapshot, project rate snapshot and calculated value are null in non-admin responses. Mock-only pages may still carry broader mock fields until those pages are replaced.
 
 ### Time Completeness
 
 - Purpose: Daily completeness overview by employee and date.
-- Main data used: employees, time entries, leave requests, overtime requests.
-- Main actions: filter by week/status/employee, inspect missing hours and overtime states.
-- Visibility: Admin and Employee in routing, but the data is operational/admin-like. To verify final product visibility.
+- Main data used: backend `TimeCompleteness/GetTimeCompleteness` rows and active employees for filters.
+- Main actions: filter by date range/status/employee and inspect backend-owned missing hours and overtime states.
+- Visibility: Admin-only route. My Day remains the employee-facing completeness summary.
 
 ### Approvals
 
 - Purpose: Review pending leave and overtime requests.
-- Main data used: leave requests, overtime requests, employees.
-- Main actions: approve/reject leave, approve/reject overtime, inspect approval history.
+- Main data used: backend leave requests, backend overtime requests/detail rows and active employees for filters.
+- Main actions: approve/reject leave and overtime through backend APIs, inspect leave approval history and review overtime day TimeEntries.
 - Visibility: Admin-only route.
 
 ### Customer Reports
@@ -499,9 +505,9 @@ Current implementation notes:
 - Sidebar: desktop navigation with collapse behavior and role-filtered items.
 - Top bar: global search placeholder, Work Item quick action, Add Time action, role switcher, and user menu.
 - Mobile bottom navigation: compact primary navigation for mobile, with role-aware `More` target.
-- Add Time dialog: responsive dialog/drawer for logging work item time.
+- Add Time dialog: API-backed responsive dialog/drawer for logging work item time.
 - Create Work Item dialog: creates frontend-only manual work items.
-- Leave Request dialog: creates frontend-only vacation/permission requests.
+- Leave Request dialog: My Day uses an API-backed vacation/permission request dialog. Legacy mock leave helpers remain only for still-mock pages.
 - Badges: shared status, priority, payment type, leave type, and level badges.
 - KPI cards: compact cards used across dashboard, project detail, reports, and completeness views.
 - Desktop tables: table components for wide layouts and admin views.
@@ -516,13 +522,8 @@ Current implementation notes:
 The following areas are still mock-only until their API integration phases:
 
 - Dashboard data and KPIs.
-- Global Work Items page.
 - Work Item comments retrieval UI.
-- Time Entries pages and create/update UI.
-- My Day.
-- Approvals.
 - Customer Reports.
-- Time Completeness.
 - Mock-context CRUD used by those pages for entities already backed elsewhere.
 
 ## 12. Notes for remaining API implementation

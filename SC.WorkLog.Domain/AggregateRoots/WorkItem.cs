@@ -67,5 +67,14 @@ namespace SC.WorkLog.Domain.AggregateRoots
             IsPriority = isPriority;
             AuditInfo.Update(currentUser);
         }
+
+        public void MoveToProject(Guid projectId, string currentUser)
+        {
+            WorkLogDomainValidation.Required(projectId, nameof(ProjectId));
+            WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
+
+            ProjectId = projectId;
+            AuditInfo.Update(currentUser);
+        }
     }
 }

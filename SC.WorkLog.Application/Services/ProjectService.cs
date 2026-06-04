@@ -81,7 +81,7 @@ namespace SC.WorkLog.Application.Services
             var milestones = await _projectMilestones.Get(x => x.ProjectId == projectId, sortOrder: x => x.Date);
             var workItems = await _workItems.Get(x => x.ProjectId == projectId);
             var statusConfigs = await GetStatusConfigsForWorkItems(workItems);
-            var timeEntries = await GetTimeEntriesForWorkItemsAsync(workItems);
+            var timeEntries = await _timeEntries.Get(x => x.ProjectId == projectId);
             var employeeIds = timeEntries.Select(x => x.EmployeeId).Distinct().ToList();
             var employees = employeeIds.Any()
                 ? await _employees.Get(x => employeeIds.Contains(x.Id))
@@ -252,7 +252,7 @@ namespace SC.WorkLog.Application.Services
                 return periods.Select(MapContractPeriod).ToList();
 
             var workItems = await _workItems.Get(x => x.ProjectId == projectId);
-            var timeEntries = await GetTimeEntriesForWorkItemsAsync(workItems);
+            var timeEntries = await _timeEntries.Get(x => x.ProjectId == projectId);
             var economicsByPeriodId = _projectReportService.CalculateAnnualRetainerEconomics(project, periods, workItems, timeEntries, AdminContext())
                 .ToDictionary(x => x.ContractPeriodId);
 
@@ -336,24 +336,24 @@ namespace SC.WorkLog.Application.Services
             var customers = await _customers.Get(x => customerIds.Contains(x.Id));
             var workItems = await _workItems.Get(x => projectIds.Contains(x.ProjectId));
             var statusConfigs = await GetStatusConfigsForWorkItems(workItems);
-            var workItemIds = workItems.Select(x => x.Id).Distinct().ToList();
-            var timeEntries = workItemIds.Any()
-                ? await _timeEntries.Get(x => workItemIds.Contains(x.WorkItemId))
+            var timeEntries = projectIds.Any()
+                ? await _timeEntries.Get(x => projectIds.Contains(x.ProjectId))
                 : new List<TimeEntry>();
 
             var customersById = customers.ToDictionary(x => x.Id);
             var workItemsByProjectId = workItems.GroupBy(x => x.ProjectId).ToDictionary(x => x.Key, x => x.ToList());
-            var timeEntriesByWorkItemId = timeEntries.GroupBy(x => x.WorkItemId).ToDictionary(x => x.Key, x => x.ToList());
+            var timeEntriesByProjectId = timeEntries.GroupBy(x => x.ProjectId).ToDictionary(x => x.Key, x => x.ToList());
             var statusConfigsByKey = statusConfigs.ToDictionary(x => x.Key);
 
-            return projects.Select(project => MapProjectListItem(project, customersById, workItemsByProjectId, timeEntriesByWorkItemId, statusConfigsByKey)).ToList();
+            return projects.Select(project => MapProjectListItem(project, customersById, workItemsByProjectId, timeEntriesByProjectId, statusConfigsByKey)).ToList();
         }
 
-        private static ProjectListItemDto MapProjectListItem(Project project, Dictionary<Guid, Customer> customersById, Dictionary<Guid, List<WorkItem>> workItemsByProjectId, Dictionary<Guid, List<TimeEntry>> timeEntriesByWorkItemId, Dictionary<string, StatusConfig> statusConfigsByKey)
+        private static ProjectListItemDto MapProjectListItem(Project project, Dictionary<Guid, Customer> customersById, Dictionary<Guid, List<WorkItem>> workItemsByProjectId, Dictionary<Guid, List<TimeEntry>> timeEntriesByProjectId, Dictionary<string, StatusConfig> statusConfigsByKey)
         {
             workItemsByProjectId.TryGetValue(project.Id, out var projectWorkItems);
             projectWorkItems = projectWorkItems ?? new List<WorkItem>();
-            var loggedHours = projectWorkItems.Sum(workItem => timeEntriesByWorkItemId.TryGetValue(workItem.Id, out var entries) ? entries.Sum(x => x.Time) : 0);
+            timeEntriesByProjectId.TryGetValue(project.Id, out var projectTimeEntries);
+            var loggedHours = (projectTimeEntries ?? new List<TimeEntry>()).Sum(x => x.Time);
 
             return new ProjectListItemDto
             {
@@ -367,14 +367,6 @@ namespace SC.WorkLog.Application.Services
                 WorkItemCount = projectWorkItems.Count,
                 OpenWorkItemCount = projectWorkItems.Count(workItem => IsOpenWorkItem(workItem, statusConfigsByKey))
             };
-        }
-
-        private async Task<List<TimeEntry>> GetTimeEntriesForWorkItemsAsync(IEnumerable<WorkItem> workItems)
-        {
-            var workItemIds = workItems.Select(x => x.Id).Distinct().ToList();
-            return workItemIds.Any()
-                ? await _timeEntries.Get(x => workItemIds.Contains(x.WorkItemId))
-                : new List<TimeEntry>();
         }
 
         private static ProjectWorkItemSummaryDto MapWorkItemSummary(List<WorkItem> workItems, Dictionary<string, StatusConfig> statusConfigsByKey)
@@ -401,7 +393,7 @@ namespace SC.WorkLog.Application.Services
                 {
                     EmployeeId = group.Key,
                     FullName = employee == null ? null : string.Concat(employee.FirstName, " ", employee.LastName),
-                    Level = employee == null ? group.First().EmployeeLevelSnapshot : employee.Level,
+                    Level = userContext != null && userContext.IsAdmin() ? (employee == null ? group.First().EmployeeLevelSnapshot : employee.Level) : (EmployeeLevel?)null,
                     LoggedHours = group.Sum(x => x.Time),
                     ApprovedHours = userContext != null && userContext.IsAdmin() ? group.Sum(x => x.ApprovedTime) : 0
                 };

@@ -37,14 +37,15 @@ namespace SC.WorkLog.Application.Services
         {
             WorkLogApplicationValidation.Required(request.EmployeeId, nameof(request.EmployeeId));
             WorkLogApplicationValidation.Required(request.WorkItemId, nameof(request.WorkItemId));
+            WorkLogApplicationValidation.Required(request.Date, nameof(request.Date));
             WorkLogApplicationValidation.HalfHourIncrement(request.Time, nameof(request.Time));
             WorkLogApplicationValidation.RequireEmployeeSelfOrAdmin(request.EmployeeId, userContext, nameof(CreateTimeEntryAsync));
 
-            var employee = await GetEmployeeOrThrow(request.EmployeeId);
+            var employee = await GetActiveEmployeeOrThrow(request.EmployeeId);
             var workItem = await GetWorkItemOrThrow(request.WorkItemId);
             var project = await GetProjectOrThrow(workItem.ProjectId);
             var projectRateSnapshot = GetProjectRateSnapshot(project, employee.Level);
-            var timeEntry = new TimeEntry(employee.Id, workItem.Id, request.Date, request.Time, request.Time, request.Description, request.Notes, RequestStatus.PendingApproval, null, employee.Level, employee.DefaultHourlyRate, projectRateSnapshot, CurrentUser(userContext));
+            var timeEntry = new TimeEntry(employee.Id, workItem.Id, workItem.ProjectId, request.Date, request.Time, request.Time, request.Description, request.Notes, RequestStatus.PendingApproval, null, employee.Level, employee.DefaultHourlyRate, projectRateSnapshot, CurrentUser(userContext));
             await _timeEntries.InsertAsync(timeEntry);
             await EvaluateOvertime(employee, timeEntry.Date, timeEntry, userContext);
             return await BuildTimeEntryDetailAsync(timeEntry, userContext);
@@ -53,14 +54,21 @@ namespace SC.WorkLog.Application.Services
         public async Task<TimeEntryDetailDto> UpdateTimeEntryAsync(UpdateTimeEntryRequest request, WorkLogUserContext userContext)
         {
             WorkLogApplicationValidation.Required(request.Id, nameof(request.Id));
+            WorkLogApplicationValidation.Required(request.Date, nameof(request.Date));
             WorkLogApplicationValidation.HalfHourIncrement(request.Time, nameof(request.Time));
             var timeEntry = await GetTimeEntryOrThrow(request.Id);
             WorkLogApplicationValidation.RequireEmployeeSelfOrAdmin(timeEntry.EmployeeId, userContext, nameof(UpdateTimeEntryAsync));
             EnsureCanModify(timeEntry, userContext);
+            var requestedWorkItemId = request.WorkItemId == Guid.Empty ? timeEntry.WorkItemId : request.WorkItemId;
+            var workItem = await GetWorkItemOrThrow(requestedWorkItemId);
+            var employee = await GetEmployeeOrThrow(timeEntry.EmployeeId);
+            var project = await GetProjectOrThrow(workItem.ProjectId);
+            var projectRateSnapshot = GetProjectRateSnapshot(project, timeEntry.EmployeeLevelSnapshot);
+            if (timeEntry.WorkItemId != workItem.Id || timeEntry.ProjectId != workItem.ProjectId || timeEntry.ProjectRateSnapshot != projectRateSnapshot)
+                timeEntry.ChangeWorkItem(workItem.Id, workItem.ProjectId, projectRateSnapshot, CurrentUser(userContext));
 
             timeEntry.UpdateLoggedTime(request.Date, request.Time, request.Description, request.Notes, CurrentUser(userContext));
             await _timeEntries.InsertOrReplace(timeEntry);
-            var employee = await GetEmployeeOrThrow(timeEntry.EmployeeId);
             await EvaluateOvertime(employee, timeEntry.Date, null, userContext);
             return await BuildTimeEntryDetailAsync(timeEntry, userContext);
         }
@@ -69,7 +77,7 @@ namespace SC.WorkLog.Application.Services
         {
             WorkLogApplicationValidation.RequireAdmin(userContext, nameof(UpdateApprovedTimeAsync));
             WorkLogApplicationValidation.Required(request.Id, nameof(request.Id));
-            WorkLogApplicationValidation.HalfHourIncrement(request.ApprovedTime, nameof(request.ApprovedTime));
+            WorkLogApplicationValidation.NonNegativeHalfHourIncrement(request.ApprovedTime, nameof(request.ApprovedTime));
             var timeEntry = await GetTimeEntryOrThrow(request.Id);
             timeEntry.Approve(request.ApprovedTime, request.AdminNote, CurrentUser(userContext));
             await _timeEntries.InsertOrReplace(timeEntry);
@@ -80,19 +88,20 @@ namespace SC.WorkLog.Application.Services
         {
             filter = filter ?? new TimeEntryFilter();
             var effectiveEmployeeId = userContext != null && !userContext.IsAdmin() ? userContext.EmployeeId : filter.EmployeeId;
-            var workItemIdsForProject = new List<Guid>();
-
-            if (filter.ProjectId.HasValue)
+            var projectIdsForCustomer = new List<Guid>();
+            if (filter.CustomerId.HasValue)
             {
-                var projectWorkItems = await _workItems.Get(x => x.ProjectId == filter.ProjectId.Value);
-                workItemIdsForProject = projectWorkItems.Select(x => x.Id).ToList();
-                if (!workItemIdsForProject.Any())
+                var customerProjects = await _projects.Get(x => x.CustomerId == filter.CustomerId.Value);
+                projectIdsForCustomer = customerProjects.Select(x => x.Id).ToList();
+                if (!projectIdsForCustomer.Any())
                     return new List<TimeEntryListItemDto>();
             }
 
             var timeEntries = await _timeEntries.Get(x => (!effectiveEmployeeId.HasValue || x.EmployeeId == effectiveEmployeeId.Value)
+                && (!filter.CustomerId.HasValue || projectIdsForCustomer.Contains(x.ProjectId))
                 && (!filter.WorkItemId.HasValue || x.WorkItemId == filter.WorkItemId.Value)
-                && (!filter.ProjectId.HasValue || workItemIdsForProject.Contains(x.WorkItemId))
+                && (!filter.ProjectId.HasValue || x.ProjectId == filter.ProjectId.Value)
+                && (!filter.Status.HasValue || x.Status == filter.Status.Value)
                 && (!filter.DateFrom.HasValue || x.Date >= filter.DateFrom.Value.Date)
                 && (!filter.DateTo.HasValue || x.Date <= filter.DateTo.Value.Date), sortOrder: x => x.Date, sortDescending: true);
 
@@ -141,6 +150,14 @@ namespace SC.WorkLog.Application.Services
             return employee;
         }
 
+        private async Task<Employee> GetActiveEmployeeOrThrow(Guid employeeId)
+        {
+            var employee = await GetEmployeeOrThrow(employeeId);
+            if (!employee.Active)
+                throw new ArgumentException("Active employee not found.");
+            return employee;
+        }
+
         private async Task<WorkItem> GetWorkItemOrThrow(Guid workItemId)
         {
             var workItem = await _workItems.GetSingleOrDefaultAsync(x => x.Id == workItemId);
@@ -177,6 +194,7 @@ namespace SC.WorkLog.Application.Services
                 EmployeeId = item.EmployeeId,
                 EmployeeName = item.EmployeeName,
                 WorkItemId = item.WorkItemId,
+                WorkItemCode = item.WorkItemCode,
                 WorkItemTitle = item.WorkItemTitle,
                 ProjectId = item.ProjectId,
                 ProjectName = item.ProjectName,
@@ -186,6 +204,8 @@ namespace SC.WorkLog.Application.Services
                 Time = item.Time,
                 ApprovedTime = item.ApprovedTime,
                 Description = item.Description,
+                Notes = item.Notes,
+                Status = item.Status,
                 AdminNote = item.AdminNote,
                 EmployeeLevelSnapshot = item.EmployeeLevelSnapshot,
                 EmployeeDefaultRateSnapshot = item.EmployeeDefaultRateSnapshot,
@@ -201,9 +221,9 @@ namespace SC.WorkLog.Application.Services
 
             var employeeIds = timeEntries.Select(x => x.EmployeeId).Distinct().ToList();
             var workItemIds = timeEntries.Select(x => x.WorkItemId).Distinct().ToList();
+            var projectIds = timeEntries.Select(x => x.ProjectId).Distinct().ToList();
             var employees = await _employees.Get(x => employeeIds.Contains(x.Id));
             var workItems = await _workItems.Get(x => workItemIds.Contains(x.Id));
-            var projectIds = workItems.Select(x => x.ProjectId).Distinct().ToList();
             var projects = projectIds.Any() ? await _projects.Get(x => projectIds.Contains(x.Id)) : new List<Project>();
             var customerIds = projects.Select(x => x.CustomerId).Distinct().ToList();
             var customers = customerIds.Any() ? await _customers.Get(x => customerIds.Contains(x.Id)) : new List<Customer>();
@@ -219,7 +239,7 @@ namespace SC.WorkLog.Application.Services
         {
             employeesById.TryGetValue(timeEntry.EmployeeId, out var employee);
             workItemsById.TryGetValue(timeEntry.WorkItemId, out var workItem);
-            var project = workItem != null && projectsById.TryGetValue(workItem.ProjectId, out var projectValue) ? projectValue : null;
+            var project = projectsById.TryGetValue(timeEntry.ProjectId, out var projectValue) ? projectValue : null;
             var customer = project != null && customersById.TryGetValue(project.CustomerId, out var customerValue) ? customerValue : null;
             var isAdmin = userContext != null && userContext.IsAdmin();
             return new TimeEntryListItemDto
@@ -228,8 +248,9 @@ namespace SC.WorkLog.Application.Services
                 EmployeeId = timeEntry.EmployeeId,
                 EmployeeName = employee == null ? null : string.Concat(employee.FirstName, " ", employee.LastName),
                 WorkItemId = timeEntry.WorkItemId,
+                WorkItemCode = workItem?.Code,
                 WorkItemTitle = workItem?.Title,
-                ProjectId = project?.Id ?? Guid.Empty,
+                ProjectId = timeEntry.ProjectId,
                 ProjectName = project?.Name,
                 CustomerId = customer?.Id ?? Guid.Empty,
                 CustomerName = customer?.CompanyName,
@@ -237,8 +258,10 @@ namespace SC.WorkLog.Application.Services
                 Time = timeEntry.Time,
                 ApprovedTime = isAdmin ? timeEntry.ApprovedTime : (decimal?)null,
                 Description = timeEntry.Description,
+                Notes = timeEntry.Notes,
+                Status = timeEntry.Status,
                 AdminNote = isAdmin ? timeEntry.AdminNote : null,
-                EmployeeLevelSnapshot = timeEntry.EmployeeLevelSnapshot,
+                EmployeeLevelSnapshot = isAdmin ? timeEntry.EmployeeLevelSnapshot : (EmployeeLevel?)null,
                 EmployeeDefaultRateSnapshot = isAdmin ? timeEntry.EmployeeDefaultRateSnapshot : (decimal?)null,
                 ProjectRateSnapshot = isAdmin ? timeEntry.ProjectRateSnapshot : (decimal?)null,
                 CalculatedValue = isAdmin ? timeEntry.ApprovedTime * (timeEntry.ProjectRateSnapshot > 0 ? timeEntry.ProjectRateSnapshot : timeEntry.EmployeeDefaultRateSnapshot) : (decimal?)null

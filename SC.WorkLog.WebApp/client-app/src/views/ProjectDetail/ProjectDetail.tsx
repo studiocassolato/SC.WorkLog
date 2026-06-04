@@ -9,6 +9,7 @@ import {
   getProjectContractPeriods,
   getProjectEconomics,
   getProjectPayments,
+  getTimeEntries,
   getWorkItems,
   type ProjectContractPeriodDto,
   type ProjectDetailDto,
@@ -17,8 +18,10 @@ import {
   type ProjectPaymentDto,
   type ProjectPaymentType,
   type ProjectStatus,
+  type RequestStatus,
   type RetainerPeriodStatus,
   type TimeAndMaterialBalanceStatus,
+  type TimeEntryListItemDto,
   type WorkItemListItemDto,
 } from "helpers/services/worklog-api"
 import { ProjectContractPeriodDialog } from "components/project-contract-period-dialog"
@@ -146,6 +149,28 @@ const originLabel = (origin: WorkItemListItemDto["origin"]) => {
 
 const statusDisplayName = (workItem: WorkItemListItemDto) =>
   workItem.statusName || workItem.customerDisplayName || workItem.statusKey
+
+const requestStatusLabel = (status: RequestStatus) => {
+  switch (status) {
+    case "PendingApproval":
+      return "Pending approval"
+    default:
+      return status
+  }
+}
+
+const getRequestStatusBadge = (status: RequestStatus) => {
+  switch (status) {
+    case "Approved":
+      return <Badge className="bg-green-500/10 text-green-600 border-green-200">Approved</Badge>
+    case "Rejected":
+      return <Badge className="bg-red-500/10 text-red-600 border-red-200">Rejected</Badge>
+    case "PendingApproval":
+      return <Badge className="bg-amber-500/10 text-amber-600 border-amber-200">Pending approval</Badge>
+    default:
+      return <Badge variant="outline">{requestStatusLabel(status)}</Badge>
+  }
+}
 
 const getBalanceBadge = (status: TimeAndMaterialBalanceStatus) => {
   switch (status) {
@@ -866,6 +891,7 @@ export default function ProjectDetailPage() {
   const { isAdmin } = useAuth()
   const [project, setProject] = useState<ProjectDetailDto | null>(null)
   const [workItems, setWorkItems] = useState<WorkItemListItemDto[]>([])
+  const [timeEntries, setTimeEntries] = useState<TimeEntryListItemDto[]>([])
   const [economics, setEconomics] = useState<ProjectEconomicsDto | null>(null)
   const [payments, setPayments] = useState<ProjectPaymentDto[]>([])
   const [contractPeriods, setContractPeriods] = useState<ProjectContractPeriodDto[]>([])
@@ -880,12 +906,14 @@ export default function ProjectDetailPage() {
   const [editingPayment, setEditingPayment] = useState<ProjectPaymentDto | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingWorkItems, setIsLoadingWorkItems] = useState(true)
+  const [isLoadingTimeEntries, setIsLoadingTimeEntries] = useState(true)
   const [isLoadingContractPeriods, setIsLoadingContractPeriods] = useState(false)
   const [isLoadingEconomics, setIsLoadingEconomics] = useState(false)
   const [isLoadingPayments, setIsLoadingPayments] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [workItemsError, setWorkItemsError] = useState<string | null>(null)
+  const [timeEntriesError, setTimeEntriesError] = useState<string | null>(null)
   const [contractPeriodsError, setContractPeriodsError] = useState<string | null>(null)
   const [economicsError, setEconomicsError] = useState<string | null>(null)
   const [paymentsError, setPaymentsError] = useState<string | null>(null)
@@ -928,6 +956,25 @@ export default function ProjectDetailPage() {
     void loadWorkItems()
   }, [loadWorkItems])
 
+  const loadTimeEntries = useCallback(async () => {
+    setIsLoadingTimeEntries(true)
+    setTimeEntriesError(null)
+
+    try {
+      const response = await getTimeEntries({ projectId: id })
+      setTimeEntries(response)
+    } catch (error) {
+      setTimeEntries([])
+      setTimeEntriesError(getErrorMessage(error))
+    } finally {
+      setIsLoadingTimeEntries(false)
+    }
+  }, [id])
+
+  useEffect(() => {
+    void loadTimeEntries()
+  }, [loadTimeEntries])
+
   const loadEconomics = useCallback(async () => {
     if (!isAdmin) return
 
@@ -948,6 +995,20 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     void loadEconomics()
   }, [loadEconomics])
+
+  useEffect(() => {
+    const refreshProjectTimeData = () => {
+      void loadTimeEntries()
+      void loadEconomics()
+    }
+
+    window.addEventListener("worklog:time-entry-saved", refreshProjectTimeData)
+    window.addEventListener("worklog:time-entry-updated", refreshProjectTimeData)
+    return () => {
+      window.removeEventListener("worklog:time-entry-saved", refreshProjectTimeData)
+      window.removeEventListener("worklog:time-entry-updated", refreshProjectTimeData)
+    }
+  }, [loadEconomics, loadTimeEntries])
 
   const loadPayments = useCallback(async () => {
     if (!isAdmin || project?.paymentType !== "TimeAndMaterial") {
@@ -1319,7 +1380,7 @@ export default function ProjectDetailPage() {
                         <div key={member.employeeId} className="flex items-center justify-between text-sm">
                           <div>
                             <p className="font-medium">{member.fullName ?? "Unknown"}</p>
-                            <p className="text-xs text-muted-foreground">{member.level}</p>
+                            {isAdmin && member.level && <p className="text-xs text-muted-foreground">{member.level}</p>}
                           </div>
                           <div className="text-right font-mono">
                             <p>{member.loggedHours}h</p>
@@ -1519,10 +1580,123 @@ export default function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="timeentries">
-          <PendingIntegration
-            title="Time entries API integration pending"
-            description="Project hours summaries come from the backend. Detailed time entry rows will be connected in a later API slice."
-          />
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">Time Entries</CardTitle>
+                  <CardDescription>Time entries loaded from TimeEntry/GetTimeEntries for this project.</CardDescription>
+                </div>
+                {isAdmin && (
+                  <Button size="sm" disabled title="Use global Add Time; project preselection can be added later">
+                    Add Time
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {timeEntriesError && (
+                <Alert variant="destructive" className="mb-4">
+                  <ShieldAlert className="h-4 w-4" />
+                  <AlertTitle>Unable to load time entries</AlertTitle>
+                  <AlertDescription>{timeEntriesError}</AlertDescription>
+                </Alert>
+              )}
+
+              {isLoadingTimeEntries ? (
+                <div className="text-center py-8">
+                  <Clock className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">Loading time entries...</p>
+                </div>
+              ) : timeEntries.length === 0 ? (
+                <div className="text-center py-8">
+                  <FolderOpen className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-muted-foreground">
+                    {timeEntriesError ? "Time entries are unavailable." : "No time entries yet"}
+                  </p>
+                  {!timeEntriesError && <p className="text-sm text-muted-foreground">Use global Add Time to create project time entries.</p>}
+                </div>
+              ) : (
+                <>
+                  <div className="hidden md:block">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Employee</TableHead>
+                          <TableHead>Work Item</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Description</TableHead>
+                          <TableHead className="text-right">Time</TableHead>
+                          {isAdmin && <TableHead className="text-right">Approved</TableHead>}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {timeEntries.map((entry) => (
+                          <TableRow key={entry.id}>
+                            <TableCell>{format(parseISO(entry.date), "MMM d, yyyy")}</TableCell>
+                            <TableCell>{entry.employeeName ?? "Unknown employee"}</TableCell>
+                            <TableCell>
+                              <div className="max-w-[240px]">
+                                <p className="font-medium truncate">{entry.workItemTitle ?? "Unknown work item"}</p>
+                                <p className="text-xs text-muted-foreground font-mono truncate">{entry.workItemId}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell>{getRequestStatusBadge(entry.status)}</TableCell>
+                            <TableCell>
+                              <div className="max-w-[260px]">
+                                <p className="truncate">{entry.description || "-"}</p>
+                                {entry.notes && <p className="text-xs text-muted-foreground truncate">{entry.notes}</p>}
+                                {isAdmin && entry.adminNote && <p className="text-xs text-muted-foreground truncate">Admin: {entry.adminNote}</p>}
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right font-mono tabular-nums">{formatHours(entry.time)}</TableCell>
+                            {isAdmin && (
+                              <TableCell className="text-right font-mono tabular-nums">
+                                {entry.approvedTime == null ? "-" : formatHours(entry.approvedTime)}
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="md:hidden space-y-3">
+                    {timeEntries.map((entry) => (
+                      <Card key={entry.id} className="py-3">
+                        <CardContent>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs text-muted-foreground">{format(parseISO(entry.date), "MMM d, yyyy")}</p>
+                              <h3 className="font-medium truncate">{entry.workItemTitle ?? "Unknown work item"}</h3>
+                              <p className="text-sm text-muted-foreground truncate">{entry.employeeName ?? "Unknown employee"}</p>
+                              <div className="mt-2">{getRequestStatusBadge(entry.status)}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="font-mono font-medium">{formatHours(entry.time)}</p>
+                              {isAdmin && (
+                                <p className="text-xs text-muted-foreground">
+                                  {entry.approvedTime == null ? "-" : `${formatHours(entry.approvedTime)} approved`}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          {(entry.description || entry.notes || (isAdmin && entry.adminNote)) && (
+                            <div className="mt-3 text-sm text-muted-foreground space-y-1">
+                              {entry.description && <p>{entry.description}</p>}
+                              {entry.notes && <p>Notes: {entry.notes}</p>}
+                              {isAdmin && entry.adminNote && <p>Admin: {entry.adminNote}</p>}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {isAdmin && (

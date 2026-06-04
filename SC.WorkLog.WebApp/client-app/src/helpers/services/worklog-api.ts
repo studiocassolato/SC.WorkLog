@@ -8,6 +8,9 @@ export type ProjectPaymentType = 'TimeAndMaterial' | 'FixedPrice' | 'AnnualRetai
 export type ProjectStatus = 'Active' | 'Suspended' | 'Closed'
 export type WorkItemPriority = 'Low' | 'Normal' | 'High' | 'Urgent'
 export type WorkItemOrigin = 'Manual' | 'Jira' | 'AzureDevOps' | 'Email'
+export type RequestStatus = 'PendingApproval' | 'Approved' | 'Rejected'
+export type LeaveRequestType = 'Vacation' | 'Permission'
+export type DailyTimeCompletenessStatus = 'OK' | 'MissingHours' | 'OvertimePending' | 'OvertimeApproved'
 export type TimeAndMaterialBalanceStatus = 'CreditAvailable' | 'Balanced' | 'OverCredit'
 export type RetainerPeriodStatus = 'Healthy' | 'Balanced' | 'OverRetainer'
 
@@ -87,7 +90,7 @@ export type ProjectWorkItemSummaryDto = {
 export type ProjectTeamMemberDto = {
   employeeId: string
   fullName: string | null
-  level: EmployeeLevel
+  level: EmployeeLevel | null
   loggedHours: number
   approvedHours: number
 }
@@ -322,10 +325,183 @@ export type WorkItemFilter = {
   projectId?: string
   customerId?: string
   assigneeId?: string
+  unassignedOnly?: boolean
   statusKey?: string
   statusTypology?: WorkItemStatusTypology
   priority?: WorkItemPriority
   includeClosed?: boolean
+}
+
+export type TimeEntryListItemDto = {
+  id: string
+  employeeId: string
+  employeeName: string | null
+  workItemId: string
+  workItemCode: string | null
+  workItemTitle: string | null
+  projectId: string
+  projectName: string | null
+  customerId: string
+  customerName: string | null
+  date: string
+  time: number
+  approvedTime: number | null
+  description: string | null
+  notes: string | null
+  status: RequestStatus
+  adminNote: string | null
+  employeeLevelSnapshot: EmployeeLevel | null
+  employeeDefaultRateSnapshot: number | null
+  projectRateSnapshot: number | null
+  calculatedValue: number | null
+}
+
+export type TimeEntryFilter = {
+  employeeId?: string
+  customerId?: string
+  projectId?: string
+  workItemId?: string
+  status?: RequestStatus
+  dateFrom?: string
+  dateTo?: string
+}
+
+export type CreateTimeEntryRequest = {
+  employeeId: string
+  workItemId: string
+  date: string
+  time: number
+  description: string | null
+  notes: string | null
+}
+
+export type UpdateTimeEntryRequest = {
+  id: string
+  workItemId: string
+  date: string
+  time: number
+  description: string | null
+  notes: string | null
+}
+
+export type UpdateApprovedTimeRequest = {
+  id: string
+  approvedTime: number
+  adminNote: string | null
+}
+
+export type LeaveRequestDto = {
+  id: string
+  employeeId: string
+  employeeName: string | null
+  type: LeaveRequestType
+  date: string
+  hours: number
+  status: RequestStatus
+  requestDate: string
+  employeeNote: string | null
+  adminNote: string | null
+}
+
+export type LeaveRequestFilter = {
+  employeeId?: string
+  type?: LeaveRequestType
+  dateFrom?: string
+  dateTo?: string
+  status?: RequestStatus
+}
+
+export type CreateLeaveRequestRequest = {
+  employeeId: string
+  type: LeaveRequestType
+  date: string
+  hours: number
+  employeeNote: string | null
+}
+
+export type ApproveLeaveRequestRequest = {
+  id: string
+  adminNote: string | null
+}
+
+export type RejectLeaveRequestRequest = {
+  id: string
+  adminNote: string | null
+}
+
+export type OvertimeRequestDto = {
+  id: string
+  employeeId: string
+  employeeName: string | null
+  date: string
+  calculatedHours: number
+  approvedHours: number
+  status: RequestStatus
+  adminNote: string | null
+  dayTimeEntries: TimeEntryListItemDto[]
+}
+
+export type OvertimeRequestFilter = {
+  employeeId?: string
+  dateFrom?: string
+  dateTo?: string
+  status?: RequestStatus
+}
+
+export type ApproveOvertimeRequestRequest = {
+  id: string
+  approvedHours: number
+  adminNote: string | null
+}
+
+export type RejectOvertimeRequestRequest = {
+  id: string
+  adminNote: string | null
+}
+
+export type DailyTimeCompletenessRowDto = {
+  employeeId: string
+  employeeName: string | null
+  date: string
+  workItemHours: number
+  leaveHours: number
+  dailyTotal: number
+  expectedDailyHours: number
+  missingHours: number
+  overtimeHours: number
+  status: DailyTimeCompletenessStatus
+}
+
+export type TimeCompletenessDto = {
+  dateFrom: string
+  dateTo: string
+  rows: DailyTimeCompletenessRowDto[]
+}
+
+export type TimeCompletenessFilter = {
+  employeeId?: string
+  dateFrom: string
+  dateTo: string
+  status?: DailyTimeCompletenessStatus
+}
+
+export type CreateWorkItemRequest = {
+  code: string | null
+  projectId: string
+  title: string
+  description: string | null
+  statusKey: string | null
+  priority: WorkItemPriority
+  assigneeId: string | null
+  origin: WorkItemOrigin
+  externalReference: string | null
+  openingDate: string
+  closingDate: string | null
+  isPriority: boolean
+}
+
+export type UpdateWorkItemRequest = CreateWorkItemRequest & {
+  id: string
 }
 
 export type SaveEmployeeRequest = Omit<EmployeeDto, 'id'>
@@ -345,6 +521,11 @@ export type WorkLogUserFilter = {
 
 export const getEmployees = async () => {
   const response = await apiClient.get<EmployeeDto[]>('/Employee/GetEmployees')
+  return response.data
+}
+
+export const getActiveEmployees = async () => {
+  const response = await apiClient.get<EmployeeDto[]>('/Employee/GetActiveEmployees')
   return response.data
 }
 
@@ -437,6 +618,81 @@ export const getWorkItems = async (filter?: WorkItemFilter) => {
 
 export const getWorkItem = async (workItemId: string) => {
   const response = await apiClient.get<WorkItemDetailDto>('/WorkItem/GetWorkItem', { params: { workItemId } })
+  return response.data
+}
+
+export const createWorkItem = async (request: CreateWorkItemRequest) => {
+  const response = await apiClient.post<WorkItemDetailDto>('/WorkItem/CreateWorkItem', request)
+  return response.data
+}
+
+export const updateWorkItem = async (request: UpdateWorkItemRequest) => {
+  const response = await apiClient.post<WorkItemDetailDto>('/WorkItem/UpdateWorkItem', request)
+  return response.data
+}
+
+export const getTimeEntries = async (filter?: TimeEntryFilter) => {
+  const response = await apiClient.get<TimeEntryListItemDto[]>('/TimeEntry/GetTimeEntries', { params: filter })
+  return response.data
+}
+
+export const createTimeEntry = async (request: CreateTimeEntryRequest) => {
+  const response = await apiClient.post<TimeEntryListItemDto>('/TimeEntry/CreateTimeEntry', request)
+  return response.data
+}
+
+export const updateTimeEntry = async (request: UpdateTimeEntryRequest) => {
+  const response = await apiClient.post<TimeEntryListItemDto>('/TimeEntry/UpdateTimeEntry', request)
+  return response.data
+}
+
+export const updateApprovedTime = async (request: UpdateApprovedTimeRequest) => {
+  const response = await apiClient.post<TimeEntryListItemDto>('/TimeEntry/UpdateApprovedTime', request)
+  return response.data
+}
+
+export const getLeaveRequests = async (filter?: LeaveRequestFilter) => {
+  const response = await apiClient.get<LeaveRequestDto[]>('/LeaveRequest/GetLeaveRequests', { params: filter })
+  return response.data
+}
+
+export const createLeaveRequest = async (request: CreateLeaveRequestRequest) => {
+  const response = await apiClient.post<LeaveRequestDto>('/LeaveRequest/CreateLeaveRequest', request)
+  return response.data
+}
+
+export const approveLeaveRequest = async (request: ApproveLeaveRequestRequest) => {
+  const response = await apiClient.post<LeaveRequestDto>('/LeaveRequest/ApproveLeaveRequest', request)
+  return response.data
+}
+
+export const rejectLeaveRequest = async (request: RejectLeaveRequestRequest) => {
+  const response = await apiClient.post<LeaveRequestDto>('/LeaveRequest/RejectLeaveRequest', request)
+  return response.data
+}
+
+export const getOvertimeRequests = async (filter?: OvertimeRequestFilter) => {
+  const response = await apiClient.get<OvertimeRequestDto[]>('/OvertimeRequest/GetOvertimeRequests', { params: filter })
+  return response.data
+}
+
+export const getOvertimeRequest = async (overtimeRequestId: string) => {
+  const response = await apiClient.get<OvertimeRequestDto>('/OvertimeRequest/GetOvertimeRequest', { params: { overtimeRequestId } })
+  return response.data
+}
+
+export const approveOvertimeRequest = async (request: ApproveOvertimeRequestRequest) => {
+  const response = await apiClient.post<OvertimeRequestDto>('/OvertimeRequest/ApproveOvertimeRequest', request)
+  return response.data
+}
+
+export const rejectOvertimeRequest = async (request: RejectOvertimeRequestRequest) => {
+  const response = await apiClient.post<OvertimeRequestDto>('/OvertimeRequest/RejectOvertimeRequest', request)
+  return response.data
+}
+
+export const getTimeCompleteness = async (filter: TimeCompletenessFilter) => {
+  const response = await apiClient.post<TimeCompletenessDto>('/TimeCompleteness/GetTimeCompleteness', filter)
   return response.data
 }
 

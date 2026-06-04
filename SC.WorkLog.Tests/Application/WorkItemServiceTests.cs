@@ -101,6 +101,20 @@ public class WorkItemServiceTests
     }
 
     [Fact]
+    public async Task CreateWorkItemAsync_WithoutAssignee_CreatesUnassignedWorkItem()
+    {
+        var context = CreateContext();
+        var service = CreateService(context);
+        var request = CreateRequest(context);
+        request.AssigneeId = null;
+
+        var response = await service.CreateWorkItemAsync(request, AdminUser(context.Employee.Id));
+
+        Assert.Null(response.AssigneeId);
+        Assert.Null(response.AssigneeName);
+    }
+
+    [Fact]
     public async Task UpdateWorkItemAsync_WithAdmin_UpdatesWorkItem()
     {
         var context = CreateContext();
@@ -112,6 +126,128 @@ public class WorkItemServiceTests
 
         Assert.Equal("Updated title", response.Title);
         Assert.Equal("Updated title", context.WorkItem.Title);
+    }
+
+    [Fact]
+    public async Task UpdateWorkItemAsync_WithActiveStatusKey_ChangesStatus()
+    {
+        var context = CreateContext();
+        var inProgress = new StatusConfig("in-progress", "In progress", WorkItemStatusTypology.InProgress, "In progress", 20, true, "admin");
+        context.StatusConfigs.Items.Add(inProgress);
+        var service = CreateService(context);
+        var request = UpdateRequest(context);
+        request.StatusKey = inProgress.Key;
+
+        var response = await service.UpdateWorkItemAsync(request, AdminUser(context.Employee.Id));
+
+        Assert.Equal(inProgress.Key, response.StatusKey);
+        Assert.Equal(WorkItemStatusTypology.InProgress, response.StatusTypology);
+        Assert.False(response.IsClosed);
+    }
+
+    [Fact]
+    public async Task UpdateWorkItemAsync_WithNullAssignee_UnassignsWorkItem()
+    {
+        var context = CreateContext();
+        var service = CreateService(context);
+        var request = UpdateRequest(context);
+        request.AssigneeId = null;
+
+        var response = await service.UpdateWorkItemAsync(request, AdminUser(context.Employee.Id));
+
+        Assert.Null(response.AssigneeId);
+        Assert.Null(response.AssigneeName);
+    }
+
+    [Fact]
+    public async Task UpdateWorkItemAsync_WithMissingAssignee_ThrowsArgumentException()
+    {
+        var context = CreateContext();
+        var service = CreateService(context);
+        var request = UpdateRequest(context);
+        request.AssigneeId = Guid.NewGuid();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateWorkItemAsync(request, AdminUser(context.Employee.Id)));
+
+        Assert.Contains("Employee not found", exception.Message);
+    }
+
+    [Fact]
+    public async Task UpdateWorkItemAsync_WithNewProject_ChangesProject()
+    {
+        var context = CreateContext();
+        var otherProject = new Project(context.Customer.Id, "Other Project", ProjectPaymentType.Internal, ProjectStatus.Active, null, null, null, null, null, "admin");
+        context.Projects.Items.Add(otherProject);
+        var service = CreateService(context);
+        var request = UpdateRequest(context);
+        request.ProjectId = otherProject.Id;
+
+        var response = await service.UpdateWorkItemAsync(request, AdminUser(context.Employee.Id));
+
+        Assert.Equal(otherProject.Id, context.WorkItem.ProjectId);
+        Assert.Equal(otherProject.Id, response.ProjectId);
+        Assert.Equal("Other Project", response.ProjectName);
+    }
+
+    [Fact]
+    public async Task UpdateWorkItemAsync_WithNewProject_UpdatesRelatedTimeEntryProjectIds()
+    {
+        var context = CreateContext();
+        var otherProject = new Project(context.Customer.Id, "Other Project", ProjectPaymentType.Internal, ProjectStatus.Active, null, null, null, null, null, "admin");
+        context.Projects.Items.Add(otherProject);
+        var firstEntry = new TimeEntry(context.Employee.Id, context.WorkItem.Id, context.Project.Id, DateTime.Today, 3m, 2m, "Work", null, RequestStatus.PendingApproval, null, EmployeeLevel.Senior, 90m, 120m, "admin");
+        var secondEntry = new TimeEntry(context.Employee.Id, context.WorkItem.Id, context.Project.Id, DateTime.Today.AddDays(1), 1m, 1m, "More work", null, RequestStatus.Approved, "Approved", EmployeeLevel.Mid, 80m, 100m, "admin");
+        context.TimeEntries.Items.Add(firstEntry);
+        context.TimeEntries.Items.Add(secondEntry);
+        var firstWorkItemId = firstEntry.WorkItemId;
+        var secondWorkItemId = secondEntry.WorkItemId;
+        var firstLevel = firstEntry.EmployeeLevelSnapshot;
+        var secondDefaultRate = secondEntry.EmployeeDefaultRateSnapshot;
+        var secondProjectRate = secondEntry.ProjectRateSnapshot;
+        var service = CreateService(context);
+        var request = UpdateRequest(context);
+        request.ProjectId = otherProject.Id;
+
+        await service.UpdateWorkItemAsync(request, AdminUser(context.Employee.Id));
+
+        Assert.All(context.TimeEntries.Items, entry => Assert.Equal(otherProject.Id, entry.ProjectId));
+        Assert.Equal(firstWorkItemId, firstEntry.WorkItemId);
+        Assert.Equal(secondWorkItemId, secondEntry.WorkItemId);
+        Assert.Equal(firstLevel, firstEntry.EmployeeLevelSnapshot);
+        Assert.Equal(secondDefaultRate, secondEntry.EmployeeDefaultRateSnapshot);
+        Assert.Equal(secondProjectRate, secondEntry.ProjectRateSnapshot);
+    }
+
+    [Fact]
+    public async Task UpdateWorkItemAsync_WithNewProject_DoesNotUpdateUnrelatedTimeEntries()
+    {
+        var context = CreateContext();
+        var otherProject = new Project(context.Customer.Id, "Other Project", ProjectPaymentType.Internal, ProjectStatus.Active, null, null, null, null, null, "admin");
+        var unrelatedWorkItem = new WorkItem("WL-X", context.Project.Id, "Unrelated", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        var unrelatedEntry = new TimeEntry(context.Employee.Id, unrelatedWorkItem.Id, context.Project.Id, DateTime.Today, 2m, 2m, "Unrelated", null, RequestStatus.PendingApproval, null, EmployeeLevel.Senior, 90m, 120m, "admin");
+        context.Projects.Items.Add(otherProject);
+        context.WorkItems.Items.Add(unrelatedWorkItem);
+        context.TimeEntries.Items.Add(unrelatedEntry);
+        var service = CreateService(context);
+        var request = UpdateRequest(context);
+        request.ProjectId = otherProject.Id;
+
+        await service.UpdateWorkItemAsync(request, AdminUser(context.Employee.Id));
+
+        Assert.Equal(context.Project.Id, unrelatedEntry.ProjectId);
+    }
+
+    [Fact]
+    public async Task UpdateWorkItemAsync_WithMissingProject_ThrowsArgumentException()
+    {
+        var context = CreateContext();
+        var service = CreateService(context);
+        var request = UpdateRequest(context);
+        request.ProjectId = Guid.NewGuid();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateWorkItemAsync(request, AdminUser(context.Employee.Id)));
+
+        Assert.Contains("Project not found", exception.Message);
     }
 
     [Fact]
@@ -145,7 +281,7 @@ public class WorkItemServiceTests
     public async Task GetWorkItemDetailAsync_HidesApprovedHoursForEmployee()
     {
         var context = CreateContext();
-        context.TimeEntries.Items.Add(new TimeEntry(context.Employee.Id, context.WorkItem.Id, DateTime.Today, 3m, 2m, "Work", null, RequestStatus.PendingApproval, null, EmployeeLevel.Senior, 90m, 120m, "admin"));
+        context.TimeEntries.Items.Add(new TimeEntry(context.Employee.Id, context.WorkItem.Id, context.Project.Id, DateTime.Today, 3m, 2m, "Work", null, RequestStatus.PendingApproval, null, EmployeeLevel.Senior, 90m, 120m, "admin"));
         var service = CreateService(context);
 
         var employeeDetail = await service.GetWorkItemDetailAsync(context.WorkItem.Id, EmployeeUser(context.Employee.Id));
@@ -154,6 +290,83 @@ public class WorkItemServiceTests
         Assert.Equal(3m, employeeDetail.LoggedHours);
         Assert.Null(employeeDetail.ApprovedHours);
         Assert.Equal(2m, adminDetail.ApprovedHours);
+    }
+
+    [Fact]
+    public async Task GetWorkItemsAsync_WithProjectFilter_ReturnsOnlyProjectItems()
+    {
+        var context = CreateContext();
+        var otherProject = new Project(context.Customer.Id, "Other Project", ProjectPaymentType.Internal, ProjectStatus.Active, null, null, null, null, null, "admin");
+        var otherWorkItem = new WorkItem("WL-OTHER", otherProject.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        context.Projects.Items.Add(otherProject);
+        context.WorkItems.Items.Add(otherWorkItem);
+        var service = CreateService(context);
+
+        var items = await service.GetWorkItemsAsync(new WorkItemFilter { ProjectId = context.Project.Id }, AdminUser(context.Employee.Id));
+
+        var item = Assert.Single(items);
+        Assert.Equal(context.WorkItem.Id, item.Id);
+    }
+
+    [Fact]
+    public async Task GetWorkItemsAsync_WithAssigneeFilter_ReturnsOnlyAssigneeItems()
+    {
+        var context = CreateContext();
+        var otherEmployee = new Employee("Grace", "Hopper", "grace@example.com", EmployeeLevel.Senior, 100m, 8m, "admin");
+        var otherWorkItem = new WorkItem("WL-OTHER", context.Project.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, otherEmployee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        context.Employees.Items.Add(otherEmployee);
+        context.WorkItems.Items.Add(otherWorkItem);
+        var service = CreateService(context);
+
+        var items = await service.GetWorkItemsAsync(new WorkItemFilter { AssigneeId = otherEmployee.Id }, AdminUser(context.Employee.Id));
+
+        var item = Assert.Single(items);
+        Assert.Equal(otherWorkItem.Id, item.Id);
+    }
+
+    [Fact]
+    public async Task GetWorkItemsAsync_WithStatusKeyFilter_ResolvesStatusDto()
+    {
+        var context = CreateContext();
+        context.WorkItem.ChangeStatus(context.ClosedStatus.Key, DateTime.Today, "admin");
+        var service = CreateService(context);
+
+        var items = await service.GetWorkItemsAsync(new WorkItemFilter { StatusKey = context.ClosedStatus.Key, IncludeClosed = true }, AdminUser(context.Employee.Id));
+
+        var item = Assert.Single(items);
+        Assert.Equal(context.ClosedStatus.Key, item.StatusKey);
+        Assert.Equal(context.ClosedStatus.Name, item.StatusName);
+        Assert.Equal(WorkItemStatusTypology.Closed, item.StatusTypology);
+        Assert.True(item.IsClosed);
+    }
+
+    [Fact]
+    public async Task GetWorkItemsAsync_ExcludeAndIncludeClosed_UsesStatusTypology()
+    {
+        var context = CreateContext();
+        context.WorkItem.ChangeStatus(context.ClosedStatus.Key, DateTime.Today, "admin");
+        var service = CreateService(context);
+
+        var openOnly = await service.GetWorkItemsAsync(new WorkItemFilter(), AdminUser(context.Employee.Id));
+        var includeClosed = await service.GetWorkItemsAsync(new WorkItemFilter { IncludeClosed = true }, AdminUser(context.Employee.Id));
+
+        Assert.Empty(openOnly);
+        Assert.Single(includeClosed);
+    }
+
+    [Fact]
+    public async Task GetWorkItemsAsync_WithUnassignedOnly_ReturnsOnlyUnassignedItems()
+    {
+        var context = CreateContext();
+        var unassigned = new WorkItem("WL-UNASSIGNED", context.Project.Id, "Unassigned task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        context.WorkItems.Items.Add(unassigned);
+        var service = CreateService(context);
+
+        var items = await service.GetWorkItemsAsync(new WorkItemFilter { UnassignedOnly = true }, AdminUser(context.Employee.Id));
+
+        var item = Assert.Single(items);
+        Assert.Equal(unassigned.Id, item.Id);
+        Assert.Null(item.AssigneeId);
     }
 
     [Fact]

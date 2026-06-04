@@ -10,12 +10,19 @@ import {
   FileText,
   FolderOpen,
   MessageSquare,
+  Pencil,
   ShieldAlert,
   User,
 } from "lucide-react"
 import { useAuth } from "helpers/services/AuthContext"
 import {
+  getActiveEmployees,
+  getProjects,
+  getStatusConfigs,
   getWorkItem,
+  type EmployeeDto,
+  type ProjectListItemDto,
+  type StatusConfigDto,
   type WorkItemListItemDto,
   type WorkItemOrigin,
   type WorkItemStatusTypology,
@@ -25,6 +32,8 @@ import { Badge } from "components/ui/badge"
 import { Button } from "components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "components/ui/card"
 import { PriorityBadge, StatusBadge } from "components/status-badges"
+import { WorkItemFormDialog } from "components/work-item-form-dialog"
+import { toast } from "sonner"
 
 const getErrorMessage = (error: unknown) => {
   const responseData = typeof error === "object" && error && "response" in error
@@ -98,7 +107,11 @@ export default function WorkItemDetailPage() {
   const { id } = useParams<{ id: string }>()
   const history = useHistory()
   const { isAdmin } = useAuth()
+  const [employees, setEmployees] = useState<EmployeeDto[]>([])
+  const [isFormOpen, setIsFormOpen] = useState(false)
   const [workItem, setWorkItem] = useState<WorkItemListItemDto | null>(null)
+  const [projects, setProjects] = useState<ProjectListItemDto[]>([])
+  const [statuses, setStatuses] = useState<StatusConfigDto[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -120,6 +133,48 @@ export default function WorkItemDetailPage() {
   useEffect(() => {
     void loadWorkItem()
   }, [loadWorkItem])
+
+  const loadReferenceData = useCallback(async () => {
+    if (!isAdmin) {
+      setEmployees([])
+      return
+    }
+
+    try {
+      const [projectResponse, statusResponse, employeeResponse] = await Promise.all([
+        getProjects(),
+        getStatusConfigs(),
+        getActiveEmployees(),
+      ])
+      setProjects(projectResponse)
+      setStatuses(statusResponse)
+      setEmployees(employeeResponse)
+    } catch (error) {
+      toast.error(getErrorMessage(error))
+    }
+  }, [isAdmin])
+
+  useEffect(() => {
+    void loadReferenceData()
+  }, [loadReferenceData])
+
+  useEffect(() => {
+    const refreshWorkItem = () => {
+      void loadWorkItem()
+    }
+
+    window.addEventListener("worklog:time-entry-saved", refreshWorkItem)
+    window.addEventListener("worklog:time-entry-updated", refreshWorkItem)
+    return () => {
+      window.removeEventListener("worklog:time-entry-saved", refreshWorkItem)
+      window.removeEventListener("worklog:time-entry-updated", refreshWorkItem)
+    }
+  }, [loadWorkItem])
+
+  const handleSaved = async () => {
+    await loadWorkItem()
+    toast.success("Work item updated successfully")
+  }
 
   const backTarget = useMemo(() => {
     if (workItem?.projectId) return `/projects/${workItem.projectId}`
@@ -178,9 +233,12 @@ export default function WorkItemDetailPage() {
           <h1 className="text-xl md:text-2xl font-semibold text-foreground">{workItem.title}</h1>
           <p className="text-muted-foreground">{workItem.projectName ?? "Unknown project"} · {workItem.customerName ?? "Unknown customer"}</p>
         </div>
-        <Button variant="outline" size="sm" disabled title="Work Item write API integration pending">
-          Edit pending
-        </Button>
+        {isAdmin && (
+          <Button variant="outline" size="sm" onClick={() => setIsFormOpen(true)}>
+            <Pencil className="h-4 w-4 mr-2" />
+            Edit
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -263,6 +321,18 @@ export default function WorkItemDetailPage() {
           </Card>
         </div>
       </div>
+
+      {isAdmin && (
+        <WorkItemFormDialog
+          open={isFormOpen}
+          onOpenChange={setIsFormOpen}
+          projects={projects}
+          statuses={statuses}
+          employees={employees}
+          workItem={workItem}
+          onSaved={handleSaved}
+        />
+      )}
     </div>
   )
 }

@@ -46,6 +46,12 @@ No `CompanySettings` collection is part of the current scope. Expected daily hou
 
 Existing persisted WorkItem records created with the previous enum-based `Status` field or the interim `StatusConfigId` field need a data migration to set `StatusKey` before those records can participate in API-backed WorkItem/project summary flows. Local/dev data can be cleared and reseeded if acceptable. Real persisted data should map old `Open`/`New` to `new`, old `InProgress` to `in-progress`, old `OnHold` to `waiting-for-customer` or `under-analysis` based on the previous meaning, old `Completed`/`Closed` to `closed`, and old `StatusConfigId` by looking up the related `StatusConfig.Key`.
 
+`TimeEntry` stores both `WorkItemId` and denormalized `ProjectId`. `WorkItemId` remains the functional relation to the ticket/activity. `ProjectId` is a backend-owned copy of `WorkItem.ProjectId` used to make project detail summaries, project economics, customer reports and project-scoped time-entry queries faster. Frontend create/update requests submit `WorkItemId`; they do not provide authoritative `ProjectId`, `ApprovedTime`, rates or snapshots.
+
+`WorkItem.ProjectId` can change. When a WorkItem is moved to another Project, `WorkItemService` bulk-updates related `TimeEntry.ProjectId` records for that WorkItem through the generic repository while keeping `TimeEntry.WorkItemId` and existing snapshots unchanged. When an individual TimeEntry is edited to point to a different WorkItem, `TimeEntryService` derives the new `ProjectId` from that WorkItem and refreshes the backend-owned project-rate snapshot from the target project. A MongoDB transaction or compensating repair task can be added later if stronger multi-document consistency is required.
+
+Existing persisted TimeEntry records created before `ProjectId` was added need a migration before project/report queries can fully rely on the denormalized field. The migration should load each `TimeEntry.WorkItemId`, read the related `WorkItem.ProjectId`, and write that value to `TimeEntry.ProjectId`. Local/development data can be cleared and reseeded if that is acceptable.
+
 `ProjectMilestone` currently follows the domain model as a separate aggregate root and therefore has its own collection. It is not embedded in `Project`.
 
 ## MongoDB Registration
@@ -103,7 +109,7 @@ Configured indexes:
 - `Project`: `CustomerId`, `PaymentType`, `Status`, compound `CustomerId + Status`.
 - `ProjectMilestone`: `ProjectId`, compound `ProjectId + Date`.
 - `WorkItem`: `ProjectId`, `AssigneeId`, `StatusKey`, `Priority`, compound `ProjectId + StatusKey`, compound `AssigneeId + StatusKey`.
-- `TimeEntry`: `WorkItemId`, `Date`, compound `EmployeeId + Date`, compound `WorkItemId + Date`.
+- `TimeEntry`: `WorkItemId`, `ProjectId`, `Date`, compound `ProjectId + Date`, compound `ProjectId + EmployeeId + Date`, compound `EmployeeId + Date`, compound `WorkItemId + Date`.
 - `ProjectPayment`: compound `ProjectId + PaymentDate`.
 - `ProjectContractPeriod`: compound `ProjectId + StartDate + EndDate`, compound `ProjectId + StartDate`, compound `ProjectId + EndDate`.
 - `LeaveRequest`: compound `EmployeeId + Date`, `Status`, compound `EmployeeId + Status`.
@@ -125,5 +131,6 @@ The following items are intentionally not implemented yet:
 - MongoDB collection validators;
 - MongoDB migrations or EF-style relational concepts;
 - data migration for old enum-based WorkItem `Status` records or interim `StatusConfigId` records to `StatusKey`;
+- data migration for existing TimeEntry records without denormalized `ProjectId`;
 - automatic execution of index creation or seed commands during host startup;
 - infrastructure integration tests requiring MongoDB.

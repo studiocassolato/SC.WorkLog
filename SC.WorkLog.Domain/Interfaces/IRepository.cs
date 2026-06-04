@@ -14,6 +14,7 @@ namespace SC.WorkLog.Domain.Interfaces
         Task InsertAsync(TEntity entity);
         Task InsertMany(IEnumerable<TEntity> entities);
         Task InsertOrReplace(TEntity entity);
+        Task<long> UpdateManyField<TField>(Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, TField>> field, TField value);
         Task<long> GetCount(Expression<Func<TEntity, bool>> predicate);
         Task CreateIndex(string indexPath);
         Task CreateCompoundIndex(bool unique, params string[] indexPaths);

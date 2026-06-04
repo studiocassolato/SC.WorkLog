@@ -6,6 +6,7 @@ using SC.WorkLog.Application.DTO.Common;
 using SC.WorkLog.Application.DTO.LeaveRequests;
 using SC.WorkLog.Application.Validation;
 using SC.WorkLog.Domain.AggregateRoots;
+using SC.WorkLog.Domain.Enums;
 using SC.WorkLog.Domain.Interfaces;
 
 namespace SC.WorkLog.Application.Services
@@ -26,6 +27,7 @@ namespace SC.WorkLog.Application.Services
             filter = filter ?? new LeaveRequestFilter();
             var effectiveEmployeeId = userContext != null && !userContext.IsAdmin() ? userContext.EmployeeId : filter.EmployeeId;
             var requests = await _leaveRequests.Get(x => (!effectiveEmployeeId.HasValue || x.EmployeeId == effectiveEmployeeId.Value)
+                && (!filter.Type.HasValue || x.Type == filter.Type.Value)
                 && (!filter.DateFrom.HasValue || x.Date >= filter.DateFrom.Value.Date)
                 && (!filter.DateTo.HasValue || x.Date <= filter.DateTo.Value.Date)
                 && (!filter.Status.HasValue || x.Status == filter.Status.Value), sortOrder: x => x.Date, sortDescending: true);
@@ -36,9 +38,11 @@ namespace SC.WorkLog.Application.Services
         public async Task<LeaveRequestDto> CreateLeaveRequestAsync(CreateLeaveRequestRequest request, WorkLogUserContext userContext)
         {
             WorkLogApplicationValidation.Required(request.EmployeeId, nameof(request.EmployeeId));
+            WorkLogApplicationValidation.Required(request.Date, nameof(request.Date));
+            EnsureValidLeaveType(request.Type);
             WorkLogApplicationValidation.HalfHourIncrement(request.Hours, nameof(request.Hours));
             WorkLogApplicationValidation.RequireEmployeeSelfOrAdmin(request.EmployeeId, userContext, nameof(CreateLeaveRequestAsync));
-            await GetEmployeeOrThrow(request.EmployeeId);
+            await GetActiveEmployeeOrThrow(request.EmployeeId);
             var leaveRequest = new LeaveRequest(request.EmployeeId, request.Type, request.Date, request.Hours, request.EmployeeNote, CurrentUser(userContext));
             await _leaveRequests.InsertAsync(leaveRequest);
             return await BuildLeaveRequestDtoAsync(leaveRequest);
@@ -78,6 +82,20 @@ namespace SC.WorkLog.Application.Services
             if (employee == null)
                 throw new ArgumentException("Employee not found.");
             return employee;
+        }
+
+        private async Task<Employee> GetActiveEmployeeOrThrow(Guid employeeId)
+        {
+            var employee = await GetEmployeeOrThrow(employeeId);
+            if (!employee.Active)
+                throw new ArgumentException("Active employee not found.");
+            return employee;
+        }
+
+        private static void EnsureValidLeaveType(LeaveRequestType type)
+        {
+            if (!Enum.IsDefined(typeof(LeaveRequestType), type))
+                throw new ArgumentException("Leave request type is invalid.");
         }
 
         private async Task<List<LeaveRequestDto>> BuildLeaveRequestListAsync(List<LeaveRequest> requests)

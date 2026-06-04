@@ -37,7 +37,7 @@ namespace SC.WorkLog.Application.Services
             WorkLogApplicationValidation.Required(projectId, nameof(projectId));
             var project = await GetProjectOrThrow(projectId);
             var workItems = await _workItems.Get(x => x.ProjectId == projectId);
-            var timeEntries = await GetTimeEntriesForWorkItemsAsync(workItems);
+            var timeEntries = await _timeEntries.Get(x => x.ProjectId == projectId);
             var dto = new ProjectEconomicsDto();
 
             if (project.PaymentType == ProjectPaymentType.TimeAndMaterial)
@@ -160,9 +160,8 @@ namespace SC.WorkLog.Application.Services
             var customerIds = projects.Select(x => x.CustomerId).Distinct().ToList();
             var customers = await _customers.Get(x => customerIds.Contains(x.Id));
             var workItems = await _workItems.Get(x => projectIds.Contains(x.ProjectId));
-            var workItemIds = workItems.Select(x => x.Id).Distinct().ToList();
-            var timeEntries = workItemIds.Any()
-                ? await _timeEntries.Get(x => workItemIds.Contains(x.WorkItemId) && x.Date >= filter.DateFrom.Date && x.Date <= filter.DateTo.Date)
+            var timeEntries = projectIds.Any()
+                ? await _timeEntries.Get(x => projectIds.Contains(x.ProjectId) && x.Date >= filter.DateFrom.Date && x.Date <= filter.DateTo.Date)
                 : new List<TimeEntry>();
 
             var workItemsById = workItems.ToDictionary(x => x.Id);
@@ -207,7 +206,7 @@ namespace SC.WorkLog.Application.Services
         private static CustomerReportWorkItemRowDto MapCustomerReportRow(TimeEntry entry, Dictionary<Guid, WorkItem> workItemsById, Dictionary<Guid, Project> projectsById, Dictionary<Guid, Customer> customersById)
         {
             var workItem = workItemsById[entry.WorkItemId];
-            var project = projectsById[workItem.ProjectId];
+            var project = projectsById[entry.ProjectId];
             customersById.TryGetValue(project.CustomerId, out var customer);
             return new CustomerReportWorkItemRowDto
             {
@@ -232,12 +231,5 @@ namespace SC.WorkLog.Application.Services
             return project;
         }
 
-        private async Task<List<TimeEntry>> GetTimeEntriesForWorkItemsAsync(IEnumerable<WorkItem> workItems)
-        {
-            var workItemIds = workItems.Select(x => x.Id).Distinct().ToList();
-            return workItemIds.Any()
-                ? await _timeEntries.Get(x => workItemIds.Contains(x.WorkItemId))
-                : new List<TimeEntry>();
-        }
     }
 }

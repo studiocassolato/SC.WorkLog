@@ -9,6 +9,7 @@ namespace SC.WorkLog.Application.DTO.WorkItems
         public Guid? ProjectId { get; set; }
         public Guid? CustomerId { get; set; }
         public Guid? AssigneeId { get; set; }
+        public bool UnassignedOnly { get; set; }
         public string StatusKey { get; set; }
         public WorkItemStatusTypology? StatusTypology { get; set; }
         public WorkItemPriority? Priority { get; set; }

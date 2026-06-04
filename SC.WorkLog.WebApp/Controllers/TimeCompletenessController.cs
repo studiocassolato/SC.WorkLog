@@ -7,7 +7,7 @@ using SC.WorkLog.Domain.Interfaces;
 
 namespace SC.WorkLog.WebApp.Controllers
 {
-    [Authorize(Policy = "AdminOnly")]
+    [Authorize]
     [ApiController]
     [Produces("application/json")]
     [Route("api/[controller]/[action]")]

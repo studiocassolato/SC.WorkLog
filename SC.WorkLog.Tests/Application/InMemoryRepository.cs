@@ -62,6 +62,19 @@ internal class InMemoryRepository<TEntity> : IRepository<TEntity> where TEntity 
         return Task.CompletedTask;
     }
 
+    public Task<long> UpdateManyField<TField>(Expression<Func<TEntity, bool>> predicate, Expression<Func<TEntity, TField>> field, TField value)
+    {
+        var propertyName = field.Body is MemberExpression memberExpression
+            ? memberExpression.Member.Name
+            : throw new ArgumentException("Field expression must target a property.", nameof(field));
+        var property = typeof(TEntity).GetProperty(propertyName)
+            ?? throw new ArgumentException($"Property {propertyName} was not found.", nameof(field));
+        var matches = Items.Where(predicate.Compile()).ToList();
+        foreach (var item in matches)
+            property.SetValue(item, value);
+        return Task.FromResult((long)matches.Count);
+    }
+
     public Task<long> GetCount(Expression<Func<TEntity, bool>> predicate)
     {
         return Task.FromResult((long)Items.Count(predicate.Compile()));

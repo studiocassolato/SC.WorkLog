@@ -83,7 +83,7 @@ The internal WorkLog shell is not rendered and no customer pages are exposed.
 ## Pending
 
 - Customer portal and customer authorization rules.
-- Connecting remaining business pages to real APIs: Dashboard, global Work Items, Time Entries, My Day, Approvals, Reports and Time Completeness. Settings, the Project area and Work Item Detail read-only are already integrated.
+- Connecting remaining business pages to real APIs: Dashboard and Reports. Settings, the Project area, Work Items, Time Entries, My Day, Approvals and Time Completeness are already integrated.
 - Replacing residual page mock data with API-backed data where those pages are still mock-only.
 - Password reset, MFA and signup flows.
 - Handling advanced Cognito challenges beyond the basic sign-in result.

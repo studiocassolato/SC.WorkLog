@@ -44,6 +44,14 @@ namespace SC.WorkLog.Application.Validation
                 throw new ArgumentException($"{fieldName} must use 0.5 hour increments.");
         }
 
+        public static void NonNegativeHalfHourIncrement(decimal value, string fieldName)
+        {
+            NonNegative(value, fieldName);
+
+            if (value * 2 != decimal.Truncate(value * 2))
+                throw new ArgumentException($"{fieldName} must use 0.5 hour increments.");
+        }
+
         public static void ValidDateRange(DateTime startDate, DateTime endDate, string endDateFieldName)
         {
             if (endDate.Date < startDate.Date)

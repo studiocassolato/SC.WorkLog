@@ -72,7 +72,10 @@ namespace SC.WorkLog.Infrastructure.Repository
             await _workItems.CreateCompoundIndex(false, nameof(WorkItem.AssigneeId), nameof(WorkItem.StatusKey));
 
             await _timeEntries.CreateIndex(nameof(TimeEntry.WorkItemId));
+            await _timeEntries.CreateIndex(nameof(TimeEntry.ProjectId));
             await _timeEntries.CreateIndex(nameof(TimeEntry.Date));
+            await _timeEntries.CreateCompoundIndex(false, nameof(TimeEntry.ProjectId), nameof(TimeEntry.Date));
+            await _timeEntries.CreateCompoundIndex(false, nameof(TimeEntry.ProjectId), nameof(TimeEntry.EmployeeId), nameof(TimeEntry.Date));
             await _timeEntries.CreateCompoundIndex(false, nameof(TimeEntry.EmployeeId), nameof(TimeEntry.Date));
             await _timeEntries.CreateCompoundIndex(false, nameof(TimeEntry.WorkItemId), nameof(TimeEntry.Date));
 

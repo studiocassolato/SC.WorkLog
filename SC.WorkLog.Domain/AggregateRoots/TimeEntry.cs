@@ -9,6 +9,7 @@ namespace SC.WorkLog.Domain.AggregateRoots
     {
         public Guid EmployeeId { get; private set; }
         public Guid WorkItemId { get; private set; }
+        public Guid ProjectId { get; private set; }
         public DateTime Date { get; private set; }
         public decimal Time { get; private set; }
         public decimal ApprovedTime { get; private set; }
@@ -24,10 +25,11 @@ namespace SC.WorkLog.Domain.AggregateRoots
         {
         }
 
-        public TimeEntry(Guid employeeId, Guid workItemId, DateTime date, decimal time, decimal approvedTime, string description, string notes, RequestStatus status, string adminNote, EmployeeLevel employeeLevelSnapshot, decimal employeeDefaultRateSnapshot, decimal projectRateSnapshot, string currentUser)
+        public TimeEntry(Guid employeeId, Guid workItemId, Guid projectId, DateTime date, decimal time, decimal approvedTime, string description, string notes, RequestStatus status, string adminNote, EmployeeLevel employeeLevelSnapshot, decimal employeeDefaultRateSnapshot, decimal projectRateSnapshot, string currentUser)
         {
             WorkLogDomainValidation.Required(employeeId, nameof(EmployeeId));
             WorkLogDomainValidation.Required(workItemId, nameof(WorkItemId));
+            WorkLogDomainValidation.Required(projectId, nameof(ProjectId));
             WorkLogDomainValidation.HalfHourIncrement(time, nameof(Time));
             WorkLogDomainValidation.HalfHourIncrement(approvedTime, nameof(ApprovedTime));
             WorkLogDomainValidation.NonNegative(employeeDefaultRateSnapshot, nameof(EmployeeDefaultRateSnapshot));
@@ -36,6 +38,7 @@ namespace SC.WorkLog.Domain.AggregateRoots
 
             EmployeeId = employeeId;
             WorkItemId = workItemId;
+            ProjectId = projectId;
             Date = date.Date;
             Time = time;
             ApprovedTime = approvedTime;
@@ -61,9 +64,31 @@ namespace SC.WorkLog.Domain.AggregateRoots
             AuditInfo.Update(currentUser);
         }
 
+        public void ChangeWorkItem(Guid workItemId, Guid projectId, decimal projectRateSnapshot, string currentUser)
+        {
+            WorkLogDomainValidation.Required(workItemId, nameof(WorkItemId));
+            WorkLogDomainValidation.Required(projectId, nameof(ProjectId));
+            WorkLogDomainValidation.NonNegative(projectRateSnapshot, nameof(ProjectRateSnapshot));
+            WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
+
+            WorkItemId = workItemId;
+            ProjectId = projectId;
+            ProjectRateSnapshot = projectRateSnapshot;
+            AuditInfo.Update(currentUser);
+        }
+
+        public void SyncProject(Guid projectId, string currentUser)
+        {
+            WorkLogDomainValidation.Required(projectId, nameof(ProjectId));
+            WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
+
+            ProjectId = projectId;
+            AuditInfo.Update(currentUser);
+        }
+
         public void Approve(decimal approvedTime, string adminNote, string currentUser)
         {
-            WorkLogDomainValidation.HalfHourIncrement(approvedTime, nameof(ApprovedTime));
+            WorkLogDomainValidation.NonNegativeHalfHourIncrement(approvedTime, nameof(ApprovedTime));
             WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
 
             ApprovedTime = approvedTime;

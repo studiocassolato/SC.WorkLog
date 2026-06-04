@@ -1,8 +1,27 @@
-import { useState } from 'react'
-import { useWorkLog } from 'lib/worklog-context'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from 'components/ui/card'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { endOfWeek, format, parseISO, startOfWeek } from 'date-fns'
+import { useAuth } from 'helpers/services/AuthContext'
+import {
+  getActiveEmployees,
+  getTimeCompleteness,
+  type DailyTimeCompletenessRowDto,
+  type DailyTimeCompletenessStatus,
+  type EmployeeDto,
+} from 'helpers/services/worklog-api'
+import { Alert, AlertDescription, AlertTitle } from 'components/ui/alert'
+import { Badge } from 'components/ui/badge'
 import { Button } from 'components/ui/button'
-import { StatusBadge } from 'components/status-badges'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from 'components/ui/card'
+import { Input } from 'components/ui/input'
+import { Label } from 'components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from 'components/ui/select'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from 'components/ui/sheet'
 import {
   Table,
   TableBody,
@@ -12,169 +31,153 @@ import {
   TableRow,
 } from 'components/ui/table'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from 'components/ui/select'
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from 'components/ui/sheet'
-import { Popover, PopoverContent, PopoverTrigger } from 'components/ui/popover'
-import { Calendar } from 'components/ui/calendar'
-import { Label } from 'components/ui/label'
-import { CalendarIcon, Filter, AlertTriangle, CheckCircle2, Clock, CheckSquare } from 'lucide-react'
-import { format, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns'
+  AlertTriangle,
+  CheckCircle2,
+  CheckSquare,
+  Clock,
+  Filter,
+  Loader2,
+  ShieldAlert,
+} from 'lucide-react'
 import { cn } from 'lib/utils'
-import type { Employee } from 'lib/mock-data'
 
-type CompletenessStatus = 'OK' | 'Missing hours' | 'Overtime pending' | 'Overtime approved'
+const toApiDate = (date: Date) => format(date, 'yyyy-MM-dd')
+const formatHours = (hours: number) => `${hours.toLocaleString('en-US', { maximumFractionDigits: 2 })}h`
 
-interface DayCompleteness {
-  employee: Employee
-  date: string
-  workItemHours: number
-  leaveHours: number
-  total: number
-  expected: number
-  delta: number
-  status: CompletenessStatus
+const getErrorMessage = (error: unknown) => {
+  const response = typeof error === 'object' && error && 'response' in error
+    ? (error as { response?: { status?: number; data?: unknown } }).response
+    : null
+  const errors = response?.data && typeof response.data === 'object'
+    ? ((response.data as { errors?: unknown; Errors?: unknown }).errors ?? (response.data as { errors?: unknown; Errors?: unknown }).Errors)
+    : null
+
+  if (response?.status === 401) return 'Authentication required. Please sign in again.'
+  if (response?.status === 403) return 'You do not have permission to view time completeness.'
+  if (Array.isArray(errors) && errors.every((item) => typeof item === 'string')) return errors.join(' ')
+  if (error instanceof Error && error.message) return error.message
+  return 'Unable to load time completeness. Please try again.'
 }
 
-export default function TimeCompletenessPage() {
-  const { employees, timeEntries, leaveRequests, overtimeRequests, role, currentUser } = useWorkLog()
+const completenessLabel = (status: DailyTimeCompletenessStatus) => {
+  if (status === 'MissingHours') return 'Missing hours'
+  if (status === 'OvertimePending') return 'Overtime pending'
+  if (status === 'OvertimeApproved') return 'Overtime approved'
+  return 'OK'
+}
 
+const completenessClass = (status: DailyTimeCompletenessStatus) => {
+  if (status === 'MissingHours') return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+  if (status === 'OvertimePending') return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+  if (status === 'OvertimeApproved') return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+  return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+}
+
+type StatusFilter = DailyTimeCompletenessStatus | 'All'
+
+export default function TimeCompletenessPage() {
+  const { isAdmin } = useAuth()
   const [dateFrom, setDateFrom] = useState<Date>(startOfWeek(new Date(), { weekStartsOn: 1 }))
   const [dateTo, setDateTo] = useState<Date>(endOfWeek(new Date(), { weekStartsOn: 1 }))
-  const [employeeFilter, setEmployeeFilter] = useState<string>('all')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [employeeFilter, setEmployeeFilter] = useState('All')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('All')
+  const [employees, setEmployees] = useState<EmployeeDto[]>([])
+  const [rows, setRows] = useState<DailyTimeCompletenessRowDto[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
 
-  // Generate day-by-day completeness data
-  const days = eachDayOfInterval({ start: dateFrom, end: dateTo })
-  // For employees, only show their own data
-  const activeEmployees = role === 'Employee' 
-    ? employees.filter((e) => e.id === currentUser.id)
-    : employees.filter((e) => e.active)
-
-  const completenessData: DayCompleteness[] = []
-
-  for (const employee of activeEmployees) {
-    for (const day of days) {
-      const dateStr = format(day, 'yyyy-MM-dd')
-
-      // Skip weekends
-      const dayOfWeek = day.getDay()
-      if (dayOfWeek === 0 || dayOfWeek === 6) continue
-
-      // Calculate work item hours
-      const workItemHours = timeEntries
-        .filter((e) => e.employeeId === employee.id && e.date === dateStr)
-        .reduce((sum, e) => sum + e.time, 0)
-
-      // Calculate approved leave hours
-      const leaveHours = leaveRequests
-        .filter(
-          (l) =>
-            l.employeeId === employee.id && l.date === dateStr && l.status === 'Approved'
-        )
-        .reduce((sum, l) => sum + l.hours, 0)
-
-      const total = workItemHours + leaveHours
-      const expected = employee.expectedDailyHours
-      const delta = total - expected
-
-      // Determine status
-      let status: CompletenessStatus = 'OK'
-      if (delta < 0) {
-        status = 'Missing hours'
-      } else if (delta > 0) {
-        const overtime = overtimeRequests.find(
-          (o) => o.employeeId === employee.id && o.date === dateStr
-        )
-        if (overtime?.status === 'Approved') {
-          status = 'Overtime approved'
-        } else if (overtime?.status === 'Pending approval') {
-          status = 'Overtime pending'
-        }
-      }
-
-      completenessData.push({
-        employee,
-        date: dateStr,
-        workItemHours,
-        leaveHours,
-        total,
-        expected,
-        delta,
-        status,
-      })
+  const loadCompleteness = useCallback(async () => {
+    if (!isAdmin) {
+      setEmployees([])
+      setRows([])
+      setIsLoading(false)
+      return
     }
-  }
 
-  // Apply filters
-  const filteredData = completenessData.filter((item) => {
-    if (employeeFilter !== 'all' && item.employee.id !== employeeFilter) return false
-    if (statusFilter !== 'all' && item.status !== statusFilter) return false
-    return true
-  })
+    setIsLoading(true)
+    setLoadError(null)
+    try {
+      const [completeness, employeeResponse] = await Promise.all([
+        getTimeCompleteness({
+          employeeId: employeeFilter === 'All' ? undefined : employeeFilter,
+          dateFrom: toApiDate(dateFrom),
+          dateTo: toApiDate(dateTo),
+          status: statusFilter === 'All' ? undefined : statusFilter,
+        }),
+        getActiveEmployees(),
+      ])
+      setRows(completeness.rows)
+      setEmployees(employeeResponse)
+    } catch (error) {
+      setRows([])
+      setEmployees([])
+      setLoadError(getErrorMessage(error))
+    } finally {
+      setIsLoading(false)
+    }
+  }, [dateFrom, dateTo, employeeFilter, isAdmin, statusFilter])
 
-  // Sort by date descending, then employee name
-  const sortedData = [...filteredData].sort((a, b) => {
+  useEffect(() => {
+    void loadCompleteness()
+  }, [loadCompleteness])
+
+  useEffect(() => {
+    const refresh = () => void loadCompleteness()
+    window.addEventListener('worklog:time-entry-saved', refresh)
+    window.addEventListener('worklog:time-entry-updated', refresh)
+    window.addEventListener('worklog:leave-request-saved', refresh)
+    window.addEventListener('worklog:leave-request-updated', refresh)
+    window.addEventListener('worklog:overtime-request-updated', refresh)
+    return () => {
+      window.removeEventListener('worklog:time-entry-saved', refresh)
+      window.removeEventListener('worklog:time-entry-updated', refresh)
+      window.removeEventListener('worklog:leave-request-saved', refresh)
+      window.removeEventListener('worklog:leave-request-updated', refresh)
+      window.removeEventListener('worklog:overtime-request-updated', refresh)
+    }
+  }, [loadCompleteness])
+
+  const sortedRows = useMemo(() => [...rows].sort((a, b) => {
     const dateCompare = b.date.localeCompare(a.date)
     if (dateCompare !== 0) return dateCompare
-    return `${a.employee.lastName}${a.employee.firstName}`.localeCompare(
-      `${b.employee.lastName}${b.employee.firstName}`
-    )
-  })
+    return (a.employeeName ?? '').localeCompare(b.employeeName ?? '')
+  }), [rows])
 
-  // Summary stats
-  const totalMissing = filteredData.filter((d) => d.status === 'Missing hours').length
-  const totalOvertimePending = filteredData.filter((d) => d.status === 'Overtime pending').length
-  const totalOK = filteredData.filter((d) => d.status === 'OK').length
+  const completeCount = rows.filter((row) => row.status === 'OK').length
+  const missingCount = rows.filter((row) => row.status === 'MissingHours').length
+  const overtimePendingCount = rows.filter((row) => row.status === 'OvertimePending').length
 
-  const FiltersContent = () => (
+  const resetFilters = () => {
+    setDateFrom(startOfWeek(new Date(), { weekStartsOn: 1 }))
+    setDateTo(endOfWeek(new Date(), { weekStartsOn: 1 }))
+    setEmployeeFilter('All')
+    setStatusFilter('All')
+  }
+
+  const filtersContent = (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label>Date From</Label>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className="w-full justify-start text-left font-normal">
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {format(dateFrom, 'PPP')}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar mode="single" selected={dateFrom} onSelect={(d) => d && setDateFrom(d)} />
-          </PopoverContent>
-        </Popover>
+        <Label>Date from</Label>
+        <Input type="date" value={toApiDate(dateFrom)} onChange={(event) => setDateFrom(parseISO(event.target.value))} />
       </div>
 
       <div className="space-y-2">
-        <Label>Date To</Label>
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className="w-full justify-start text-left font-normal">
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {format(dateTo, 'PPP')}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-0" align="start">
-            <Calendar mode="single" selected={dateTo} onSelect={(d) => d && setDateTo(d)} />
-          </PopoverContent>
-        </Popover>
+        <Label>Date to</Label>
+        <Input type="date" value={toApiDate(dateTo)} onChange={(event) => setDateTo(parseISO(event.target.value))} />
       </div>
 
       <div className="space-y-2">
         <Label>Employee</Label>
         <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
           <SelectTrigger>
-            <SelectValue placeholder="All employees" />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All employees</SelectItem>
-            {activeEmployees.map((e) => (
-              <SelectItem key={e.id} value={e.id}>
-                {e.firstName} {e.lastName}
+            <SelectItem value="All">All employees</SelectItem>
+            {employees.map((employee) => (
+              <SelectItem key={employee.id} value={employee.id}>
+                {employee.firstName} {employee.lastName}
               </SelectItem>
             ))}
           </SelectContent>
@@ -183,38 +186,37 @@ export default function TimeCompletenessPage() {
 
       <div className="space-y-2">
         <Label>Status</Label>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
           <SelectTrigger>
-            <SelectValue placeholder="All statuses" />
+            <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="All">All statuses</SelectItem>
             <SelectItem value="OK">OK</SelectItem>
-            <SelectItem value="Missing hours">Missing hours</SelectItem>
-            <SelectItem value="Overtime pending">Overtime pending</SelectItem>
-            <SelectItem value="Overtime approved">Overtime approved</SelectItem>
+            <SelectItem value="MissingHours">Missing hours</SelectItem>
+            <SelectItem value="OvertimePending">Overtime pending</SelectItem>
+            <SelectItem value="OvertimeApproved">Overtime approved</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
-      <Button
-        variant="outline"
-        className="w-full"
-        onClick={() => {
-          setDateFrom(startOfWeek(new Date(), { weekStartsOn: 1 }))
-          setDateTo(endOfWeek(new Date(), { weekStartsOn: 1 }))
-          setEmployeeFilter('all')
-          setStatusFilter('all')
-        }}
-      >
+      <Button variant="outline" className="w-full" onClick={resetFilters}>
         Reset filters
       </Button>
     </div>
   )
 
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16">
+        <h1 className="text-2xl font-bold mb-2">Access Denied</h1>
+        <p className="text-muted-foreground">This page is only available for administrators.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
           <CheckSquare className="h-5 w-5 text-primary" />
@@ -222,19 +224,26 @@ export default function TimeCompletenessPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Time Completeness</h1>
           <p className="text-sm text-muted-foreground">
-            {totalOK} complete, {totalMissing} missing, {totalOvertimePending} pending
+            {completeCount} complete, {missingCount} missing, {overtimePendingCount} overtime pending
           </p>
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {loadError && (
+        <Alert variant="destructive">
+          <ShieldAlert className="h-4 w-4" />
+          <AlertTitle>Unable to load Time Completeness</AlertTitle>
+          <AlertDescription>{loadError}</AlertDescription>
+        </Alert>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Complete Days</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <CheckCircle2 className="h-5 w-5 text-green-500" />
-              {totalOK}
+              {completeCount}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -243,7 +252,7 @@ export default function TimeCompletenessPage() {
             <CardDescription>Missing Hours</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <AlertTriangle className="h-5 w-5 text-red-500" />
-              {totalMissing}
+              {missingCount}
             </CardTitle>
           </CardHeader>
         </Card>
@@ -252,64 +261,18 @@ export default function TimeCompletenessPage() {
             <CardDescription>Overtime Pending</CardDescription>
             <CardTitle className="flex items-center gap-2 text-2xl">
               <Clock className="h-5 w-5 text-amber-500" />
-              {totalOvertimePending}
+              {overtimePendingCount}
             </CardTitle>
           </CardHeader>
         </Card>
       </div>
 
-      {/* Desktop Filters */}
-      <div className="hidden lg:flex items-center gap-4">
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className="justify-start text-left font-normal">
-              <CalendarIcon className="mr-2 h-4 w-4" />
-              {format(dateFrom, 'MMM d')} - {format(dateTo, 'MMM d, yyyy')}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-auto p-4" align="start">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>From</Label>
-                <Calendar mode="single" selected={dateFrom} onSelect={(d) => d && setDateFrom(d)} />
-              </div>
-              <div className="space-y-2">
-                <Label>To</Label>
-                <Calendar mode="single" selected={dateTo} onSelect={(d) => d && setDateTo(d)} />
-              </div>
-            </div>
-          </PopoverContent>
-        </Popover>
+      <Card className="hidden lg:block">
+        <CardContent className="pt-6">
+          {filtersContent}
+        </CardContent>
+      </Card>
 
-        <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All employees" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All employees</SelectItem>
-            {activeEmployees.map((e) => (
-              <SelectItem key={e.id} value={e.id}>
-                {e.firstName} {e.lastName}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="OK">OK</SelectItem>
-            <SelectItem value="Missing hours">Missing hours</SelectItem>
-            <SelectItem value="Overtime pending">Overtime pending</SelectItem>
-            <SelectItem value="Overtime approved">Overtime approved</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Mobile Filters */}
       <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
         <SheetTrigger asChild>
           <Button variant="outline" className="lg:hidden w-full">
@@ -322,124 +285,111 @@ export default function TimeCompletenessPage() {
             <SheetTitle>Filters</SheetTitle>
           </SheetHeader>
           <div className="mt-4">
-            <FiltersContent />
+            {filtersContent}
           </div>
         </SheetContent>
       </Sheet>
 
-      {/* Desktop Table */}
-      <div className="hidden md:block bg-card border rounded-sm overflow-hidden">
-          <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Employee</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead className="text-right">Work Hours</TableHead>
-              <TableHead className="text-right">Leave</TableHead>
-              <TableHead className="text-right">Total</TableHead>
-              <TableHead className="text-right">Expected</TableHead>
-              <TableHead className="text-right">Delta</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sortedData.map((item) => (
-              <TableRow
-                key={`${item.employee.id}-${item.date}`}
-                className={cn(item.status === 'Missing hours' && 'bg-red-50/50 dark:bg-red-950/10')}
-              >
-                <TableCell className="font-medium">
-                  {item.employee.firstName} {item.employee.lastName}
-                </TableCell>
-                <TableCell>{format(new Date(item.date), 'EEE, MMM d')}</TableCell>
-                <TableCell className="text-right font-mono">{item.workItemHours}h</TableCell>
-                <TableCell className="text-right font-mono">
-                  {item.leaveHours > 0 ? `${item.leaveHours}h` : '-'}
-                </TableCell>
-                <TableCell className="text-right font-mono font-medium">{item.total}h</TableCell>
-                <TableCell className="text-right font-mono text-muted-foreground">
-                  {item.expected}h
-                </TableCell>
-                <TableCell
-                  className={cn(
-                    'text-right font-mono font-medium',
-                    item.delta < 0 && 'text-red-600',
-                    item.delta > 0 && 'text-blue-600'
-                  )}
-                >
-                  {item.delta > 0 ? '+' : ''}
-                  {item.delta}h
-                </TableCell>
-                <TableCell>
-                  <StatusBadge status={item.status} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Mobile Cards */}
-      <div className="md:hidden space-y-3">
-        {sortedData.map((item) => (
-          <Card
-            key={`${item.employee.id}-${item.date}`}
-            className={cn(
-              "py-3",
-              item.status === 'Missing hours' && 'border-red-200 dark:border-red-900'
-            )}
-          >
-            <CardContent>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="font-medium">
-                    {item.employee.firstName} {item.employee.lastName}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {format(new Date(item.date), 'EEE, MMM d, yyyy')}
-                  </p>
-                </div>
-                <StatusBadge status={item.status} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Daily Completeness</CardTitle>
+          <CardDescription>Backend-owned expected, worked, leave, missing and overtime summary.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Loading time completeness...
+            </div>
+          ) : sortedRows.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <CheckCircle2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
+              <h3 className="font-medium text-lg">No data found</h3>
+              <p className="text-sm text-muted-foreground">Try adjusting your filters.</p>
+            </div>
+          ) : (
+            <>
+              <div className="hidden md:block rounded-sm border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Employee</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead className="text-right">Worked</TableHead>
+                      <TableHead className="text-right">Leave</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead className="text-right">Expected</TableHead>
+                      <TableHead className="text-right">Missing</TableHead>
+                      <TableHead className="text-right">Overtime</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedRows.map((row) => (
+                      <TableRow key={`${row.employeeId}-${row.date}`} className={cn(row.status === 'MissingHours' && 'bg-red-50/50 dark:bg-red-950/10')}>
+                        <TableCell className="font-medium">{row.employeeName ?? 'Unknown employee'}</TableCell>
+                        <TableCell>{format(parseISO(row.date), 'EEE, MMM d')}</TableCell>
+                        <TableCell className="text-right font-mono">{formatHours(row.workItemHours)}</TableCell>
+                        <TableCell className="text-right font-mono">{row.leaveHours > 0 ? formatHours(row.leaveHours) : '-'}</TableCell>
+                        <TableCell className="text-right font-mono font-medium">{formatHours(row.dailyTotal)}</TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">{formatHours(row.expectedDailyHours)}</TableCell>
+                        <TableCell className="text-right font-mono text-red-600">{row.missingHours > 0 ? formatHours(row.missingHours) : '-'}</TableCell>
+                        <TableCell className="text-right font-mono text-blue-600">{row.overtimeHours > 0 ? formatHours(row.overtimeHours) : '-'}</TableCell>
+                        <TableCell>
+                          <CompletenessBadge status={row.status} />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-              <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                <div>
-                  <p className="text-xs text-muted-foreground">Work</p>
-                  <p className="font-mono font-medium">{item.workItemHours}h</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Leave</p>
-                  <p className="font-mono font-medium">{item.leaveHours > 0 ? `${item.leaveHours}h` : '-'}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Total</p>
-                  <p className="font-mono font-medium">{item.total}h</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Delta</p>
-                  <p
-                    className={cn(
-                      'font-mono font-medium',
-                      item.delta < 0 && 'text-red-600',
-                      item.delta > 0 && 'text-blue-600'
-                    )}
-                  >
-                    {item.delta > 0 ? '+' : ''}
-                    {item.delta}h
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
 
-      {sortedData.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <CheckCircle2 className="h-12 w-12 text-muted-foreground/50 mb-4" />
-          <h3 className="font-medium text-lg">No data found</h3>
-          <p className="text-sm text-muted-foreground">Try adjusting your filters</p>
-        </div>
-      )}
+              <div className="md:hidden space-y-3">
+                {sortedRows.map((row) => (
+                  <Card key={`${row.employeeId}-${row.date}`} className={cn('py-3', row.status === 'MissingHours' && 'border-red-200 dark:border-red-900')}>
+                    <CardContent>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium">{row.employeeName ?? 'Unknown employee'}</p>
+                          <p className="text-sm text-muted-foreground">{format(parseISO(row.date), 'EEE, MMM d, yyyy')}</p>
+                        </div>
+                        <CompletenessBadge status={row.status} />
+                      </div>
+                      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+                        <Metric label="Worked" value={formatHours(row.workItemHours)} />
+                        <Metric label="Leave" value={row.leaveHours > 0 ? formatHours(row.leaveHours) : '-'} />
+                        <Metric label="Total" value={formatHours(row.dailyTotal)} />
+                        <Metric label="Expected" value={formatHours(row.expectedDailyHours)} />
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-center">
+                        <Metric label="Missing" value={row.missingHours > 0 ? formatHours(row.missingHours) : '-'} />
+                        <Metric label="Overtime" value={row.overtimeHours > 0 ? formatHours(row.overtimeHours) : '-'} />
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function CompletenessBadge({ status }: { status: DailyTimeCompletenessStatus }) {
+  return (
+    <Badge variant="secondary" className={cn('font-medium', completenessClass(status))}>
+      {completenessLabel(status)}
+    </Badge>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="font-mono font-medium">{value}</p>
     </div>
   )
 }

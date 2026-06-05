@@ -5,7 +5,7 @@ This document tracks frontend areas that are backed by the WorkLog API.
 ## Current API-Backed Areas
 
 - Authentication shell and current-user resolution use `/api/Auth/Me`.
-- Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, Project Detail Work Items tab, Project Detail Time Entries tab, global Work Items, Work Item Detail, global Time Entries, Add Time, My Day, Approvals, Time Completeness, TimeEntry update and Admin ApprovedTime are API-backed through `Project/GetProjects`, `Project/SearchProjects`, `Project/GetProject`, `Project/CreateProject`, `Project/UpdateProject`, `Project/GetProjectEconomics`, `Project/GetProjectPayments`, `Project/CreateProjectPayment`, `Project/UpdateProjectPayment`, `Project/DeleteProjectPayment`, `Project/GetProjectContractPeriods`, `Project/CreateProjectContractPeriod`, `Project/UpdateProjectContractPeriod`, `Project/DeleteProjectContractPeriod`, `Project/CreateMilestone`, `Project/UpdateMilestone`, `Project/DeleteMilestone`, `WorkItem/GetWorkItems`, `WorkItem/GetWorkItem`, `WorkItem/CreateWorkItem`, `WorkItem/UpdateWorkItem`, `TimeEntry/GetTimeEntries`, `TimeEntry/CreateTimeEntry`, `TimeEntry/UpdateTimeEntry`, `TimeEntry/UpdateApprovedTime`, `LeaveRequest/GetLeaveRequests`, `LeaveRequest/CreateLeaveRequest`, `LeaveRequest/ApproveLeaveRequest`, `LeaveRequest/RejectLeaveRequest`, `OvertimeRequest/GetOvertimeRequests`, `OvertimeRequest/GetOvertimeRequest`, `OvertimeRequest/ApproveOvertimeRequest`, `OvertimeRequest/RejectOvertimeRequest` and `TimeCompleteness/GetTimeCompleteness`.
+- Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, Project Detail Work Items tab, Project Detail Time Entries tab, global Work Items, Work Item Detail, global Time Entries, Add Time, My Day, Approvals, Time Completeness, Customer Reports, TimeEntry update and Admin ApprovedTime are API-backed through `Project/GetProjects`, `Project/SearchProjects`, `Project/GetProject`, `Project/CreateProject`, `Project/UpdateProject`, `Project/GetProjectEconomics`, `Project/GetProjectPayments`, `Project/CreateProjectPayment`, `Project/UpdateProjectPayment`, `Project/DeleteProjectPayment`, `Project/GetProjectContractPeriods`, `Project/CreateProjectContractPeriod`, `Project/UpdateProjectContractPeriod`, `Project/DeleteProjectContractPeriod`, `Project/CreateMilestone`, `Project/UpdateMilestone`, `Project/DeleteMilestone`, `WorkItem/GetWorkItems`, `WorkItem/GetWorkItem`, `WorkItem/CreateWorkItem`, `WorkItem/UpdateWorkItem`, `TimeEntry/GetTimeEntries`, `TimeEntry/CreateTimeEntry`, `TimeEntry/UpdateTimeEntry`, `TimeEntry/UpdateApprovedTime`, `LeaveRequest/GetLeaveRequests`, `LeaveRequest/CreateLeaveRequest`, `LeaveRequest/ApproveLeaveRequest`, `LeaveRequest/RejectLeaveRequest`, `OvertimeRequest/GetOvertimeRequests`, `OvertimeRequest/GetOvertimeRequest`, `OvertimeRequest/ApproveOvertimeRequest`, `OvertimeRequest/RejectOvertimeRequest`, `TimeCompleteness/GetTimeCompleteness` and `Report/GetCustomerReport`.
 - Settings includes only Statuses, Customers and Employees.
 - Settings Statuses uses `StatusConfig` API endpoints for configurable Work Item workflow statuses.
 - Settings Employees uses `Employee` API endpoints for operational/HR employee data.
@@ -16,9 +16,9 @@ The Company Settings tab is not part of the current scope. Expected daily hours 
 
 ## Projects API Integration
 
-Projects list uses backend `ProjectListItemDto` data for project name, customer name, payment type, status, logged hours, work item count and open work item count. Search, status and payment-type filters call `Project/SearchProjects`; the unfiltered view calls `Project/GetProjects`.
+Projects list uses backend `ProjectListItemDto` data for project name, customer name, default-project flag, payment type, status, logged hours, work item count and open work item count. Search, status and payment-type filters call `Project/SearchProjects`; the unfiltered view calls `Project/GetProjects`. Payment type remains visible/filterable only for Admin users.
 
-Admin users can create and update base Project fields through `Project/CreateProject` and `Project/UpdateProject`. The form uses backend current-user authorization, loads customers from `Customer/GetCustomers`, prefers active customers in the selector, and supports customer, project name, payment type, status and notes.
+Admin users can create and update base Project fields through `Project/CreateProject` and `Project/UpdateProject`. The form uses backend current-user authorization, loads customers from `Customer/GetCustomers`, prefers active customers in the selector, and supports customer, project name, payment type, status, default-project flag and notes. The backend enforces at most one default project per customer.
 
 Payment-type-specific project fields:
 
@@ -73,9 +73,16 @@ Overtime approvals load through `OvertimeRequest/GetOvertimeRequests` and `Overt
 
 The Time Completeness page is API-backed through `TimeCompleteness/GetTimeCompleteness` and is an Admin-focused operational page. It uses backend filters for date range, employee and daily completeness status. The frontend renders backend DTO fields for expected daily hours, worked hours, approved leave hours, daily total, missing hours, overtime hours and status, and does not recompute authoritative completeness locally.
 
+## Customer Reports API Integration
+
+Customer Reports is API-backed and Admin-only. The page loads active customers through `Customer/GetCustomers`, loads optional project filter choices through `Project/SearchProjects` after a customer is selected, and posts the selected customer/date range/project filter to `Report/GetCustomerReport`.
+
+`Report/GetCustomerReport` is the source of truth for total hours, approved hours and worked value. The frontend groups returned rows only for visual charts/tables and does not use mock TimeEntries, mock WorkItems or mock Projects as report data. CSV export is generated only from the currently loaded backend report rows. PDF generation and official export delivery remain pending.
+
 Still pending:
 
 - Work Item comments retrieval UI;
+- Dashboard API integration;
 - pagination for project list/search and Work Item list endpoints.
 - Work Item origin filtering;
 - Project Detail Add Work Item shortcut.
@@ -126,5 +133,5 @@ Customer portal users are configured from the customer create/edit form:
 
 - Settings operations are not transactional. If Employee/Customer save succeeds and `WorkLogUser` save fails, the UI shows a warning and reloads the saved data.
 - `WorkLogUser/GetUsers` supports server-side filters. Settings queries linked access records by `EmployeeId` or `CustomerId` instead of loading all WorkLog users. Pagination is still pending.
-- Business pages outside Settings, Projects, Work Items, Time Entries, My Day, Approvals and Time Completeness use mock or pending data. Work Item comments remain postponed until Jira/comment sync strategy is defined or abandoned. Reports and Dashboard remain pending.
+- Business pages outside Settings, Projects, Work Items, Time Entries, My Day, Approvals, Time Completeness and Customer Reports use mock or pending data. Work Item comments remain postponed until Jira/comment sync strategy is defined or abandoned. Dashboard remains pending.
 - Customer portal pages and customer authorization rules are not implemented.

@@ -8,7 +8,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SC.WorkLog.Application;
 using SC.WorkLog.Application.DTO.Common;
+using SC.WorkLog.Application.DTO.ExternalImport;
 using SC.WorkLog.Application.Services;
+using SC.WorkLog.Application.Services.ExternalImport;
 using SC.WorkLog.Common.Settings;
 using SC.WorkLog.Domain.AggregateRoots;
 using SC.WorkLog.Domain.Enums;
@@ -22,6 +24,8 @@ namespace SC.WorkLog.ConsoleTester
         private const string AdminEmail = "nicola@studiocassolato.it";
         private const string SeedUser = "console-seed";
         private const string EnsureDefaultStatusesCommand = "EnsureDefaultStatuses";
+        private const string ImportJiraSupportIssuesCommand = "ImportJiraSupportIssues";
+        private const string ImportJiraSupportTempoWorklogsCommand = "ImportJiraSupportTempoWorklogs";
 
         private static async Task Main(string[] args)
         {
@@ -35,10 +39,21 @@ namespace SC.WorkLog.ConsoleTester
             using (var serviceProvider = services.BuildServiceProvider())
             using (var scope = serviceProvider.CreateScope())
             {
-                if (args.Length > 0 && string.Equals(args[0], EnsureDefaultStatusesCommand, StringComparison.OrdinalIgnoreCase))
-                    await EnsureDefaultStatuses(scope.ServiceProvider);
+                if (args.Length > 0)
+                {
+                    if (string.Equals(args[0], EnsureDefaultStatusesCommand, StringComparison.OrdinalIgnoreCase))
+                        await EnsureDefaultStatuses(scope.ServiceProvider);
+                    else if (string.Equals(args[0], ImportJiraSupportIssuesCommand, StringComparison.OrdinalIgnoreCase))
+                        await ImportJiraSupportIssues(scope.ServiceProvider, args.Skip(1).ToArray());
+                    else if (string.Equals(args[0], ImportJiraSupportTempoWorklogsCommand, StringComparison.OrdinalIgnoreCase))
+                        await ImportJiraSupportTempoWorklogs(scope.ServiceProvider, args.Skip(1).ToArray());
+                    else
+                        throw new ArgumentException($"Unknown command '{args[0]}'.");
+                }
                 else
+                {
                     await SeedAdminUser(scope.ServiceProvider);
+                }
             }
 
             Console.WriteLine($"ConsoleTester completed. Environment: {environmentName}.");
@@ -73,16 +88,15 @@ namespace SC.WorkLog.ConsoleTester
             }
 
             var user = await users.GetSingleOrDefaultAsync(x => x.Email == AdminEmail);
-            var seedCognitoSub = $"seed:{AdminEmail}";
             if (user == null)
             {
-                user = new WorkLogUser(AdminEmail, seedCognitoSub, WorkLogUserType.Employee, WorkLogUserRole.Admin, employee.Id, null, "Nicola Cassolato", SeedUser);
+                user = new WorkLogUser(AdminEmail, WorkLogUserType.Employee, WorkLogUserRole.Admin, employee.Id, null, "Nicola Cassolato", SeedUser);
                 await users.InsertAsync(user);
                 Console.WriteLine($"Created admin WorkLog user {AdminEmail}.");
                 return;
             }
 
-            user.Update(AdminEmail, string.IsNullOrWhiteSpace(user.CognitoSub) ? seedCognitoSub : user.CognitoSub, WorkLogUserType.Employee, WorkLogUserRole.Admin, employee.Id, null, string.IsNullOrWhiteSpace(user.DisplayName) ? "Nicola Cassolato" : user.DisplayName, true, SeedUser);
+            user.Update(AdminEmail, WorkLogUserType.Employee, WorkLogUserRole.Admin, employee.Id, null, string.IsNullOrWhiteSpace(user.DisplayName) ? "Nicola Cassolato" : user.DisplayName, true, SeedUser);
             await users.InsertOrReplace(user);
             Console.WriteLine($"Updated admin WorkLog user {AdminEmail}.");
         }
@@ -142,6 +156,24 @@ namespace SC.WorkLog.ConsoleTester
             }
         }
 
+        private static async Task ImportJiraSupportIssues(IServiceProvider serviceProvider, string[] args)
+        {
+            var indexes = serviceProvider.GetRequiredService<WorkLogDatabaseIndexes>();
+            var service = serviceProvider.GetRequiredService<JiraImportService>();
+            await indexes.EnsureCreatedAsync();
+            var result = await service.ImportSupportIssuesAsync(ParseImportOptions(args));
+            PrintImportResult(result);
+        }
+
+        private static async Task ImportJiraSupportTempoWorklogs(IServiceProvider serviceProvider, string[] args)
+        {
+            var indexes = serviceProvider.GetRequiredService<WorkLogDatabaseIndexes>();
+            var service = serviceProvider.GetRequiredService<JiraImportService>();
+            await indexes.EnsureCreatedAsync();
+            var result = await service.ImportSupportTempoWorklogsAsync(ParseImportOptions(args));
+            PrintImportResult(result);
+        }
+
         private static WorkLogUserContext AdminContext()
         {
             return new WorkLogUserContext
@@ -155,6 +187,77 @@ namespace SC.WorkLog.ConsoleTester
         {
             var list = keys.ToList();
             return list.Any() ? string.Join(", ", list) : "(none)";
+        }
+
+        private static ExternalImportOptions ParseImportOptions(string[] args)
+        {
+            var options = new ExternalImportOptions();
+            for (var index = 0; index < args.Length; index++)
+            {
+                var arg = args[index];
+                if (string.Equals(arg, "--full", StringComparison.OrdinalIgnoreCase))
+                    options.Mode = ExternalImportMode.Full;
+                else if (string.Equals(arg, "--update-only", StringComparison.OrdinalIgnoreCase))
+                    options.Mode = ExternalImportMode.UpdateOnly;
+                else if (string.Equals(arg, "--dry-run", StringComparison.OrdinalIgnoreCase))
+                    options.DryRun = true;
+                else if (string.Equals(arg, "--issue", StringComparison.OrdinalIgnoreCase))
+                    options.IssueKey = ReadOptionValue(args, ref index, "--issue");
+                else if (string.Equals(arg, "--max", StringComparison.OrdinalIgnoreCase))
+                    options.Max = int.Parse(ReadOptionValue(args, ref index, "--max"));
+                else if (string.Equals(arg, "--since", StringComparison.OrdinalIgnoreCase))
+                    options.Since = DateTime.Parse(ReadOptionValue(args, ref index, "--since"));
+                else
+                    throw new ArgumentException($"Unknown option '{arg}'.");
+            }
+            return options;
+        }
+
+        private static string ReadOptionValue(string[] args, ref int index, string option)
+        {
+            if (index + 1 >= args.Length)
+                throw new ArgumentException($"{option} requires a value.");
+            index++;
+            return args[index];
+        }
+
+        private static void PrintImportResult(ExternalImportResult result)
+        {
+            Console.WriteLine($"Source: {result.Source}");
+            Console.WriteLine($"Project: {result.ProjectKey}");
+            Console.WriteLine($"Mode: {result.Mode}");
+            Console.WriteLine($"Dry-run: {result.DryRun}");
+            Console.WriteLine($"Previous last successful sync: {FormatDate(result.PreviousLastSuccessfulSync)}");
+            Console.WriteLine($"New last successful sync: {FormatDate(result.NewLastSuccessfulSync)}");
+            Console.WriteLine($"Fetched: {result.TotalFetched}");
+            Console.WriteLine($"Created: {result.CreatedCount}");
+            Console.WriteLine($"Updated: {result.UpdatedCount}");
+            Console.WriteLine($"Skipped: {result.SkippedCount}");
+            Console.WriteLine($"Warnings: {result.Warnings.Count + result.UnmappedStatuses.Count + result.UnknownCustomers.Count + result.MissingDefaultProjects.Count + result.MissingEmployees.Count}");
+            Console.WriteLine($"Errors: {result.ErrorCount}");
+            Console.WriteLine($"Unmapped statuses: {result.UnmappedStatuses.Count}");
+            Console.WriteLine($"Unknown customers: {result.UnknownCustomers.Count}");
+            Console.WriteLine($"Missing default projects: {result.MissingDefaultProjects.Count}");
+            Console.WriteLine($"Missing employees: {result.MissingEmployees.Count}");
+            if (!string.IsNullOrWhiteSpace(result.RateLimitSummary))
+                Console.WriteLine($"Rate limits: {result.RateLimitSummary}");
+            PrintMessages("Warnings", result.Warnings);
+            PrintMessages("Errors", result.Errors);
+        }
+
+        private static void PrintMessages(string title, IEnumerable<string> messages)
+        {
+            var list = messages.Distinct().Take(50).ToList();
+            if (!list.Any())
+                return;
+            Console.WriteLine(title + ":");
+            foreach (var message in list)
+                Console.WriteLine($"- {message}");
+        }
+
+        private static string FormatDate(DateTime? value)
+        {
+            return value.HasValue ? value.Value.ToString("O") : "(none)";
         }
     }
 }

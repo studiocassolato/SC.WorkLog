@@ -2,7 +2,7 @@
 
 ## 1. Summary
 
-This audit was performed before starting the next Work Items phase. The current implementation is stable enough to continue: the backend architecture remains layered, the Project area respects the API-backed/mock boundary, and validation passes after the cleanup changes below.
+This audit tracks code-quality findings across the API-backed slices completed through Customer Reports. The current implementation is stable enough to start a Dashboard redesign/API integration phase: the backend architecture remains layered, implemented business areas respect the API-backed/mock boundary, and validation passes.
 
 Small fixes were applied during the audit:
 
@@ -27,7 +27,7 @@ Initial baseline before cleanup:
 Final validation after cleanup:
 
 - `dotnet build SC.WorkLog.sln`: passed, 0 warnings.
-- `dotnet test SC.WorkLog.sln --no-build`: passed, 169 tests.
+- `dotnet test SC.WorkLog.sln --no-build`: passed, 186 tests.
 - `npm run build`: passed.
 - `npm run lint`: passed.
 
@@ -93,14 +93,15 @@ The Project area respects the intended API-backed scope:
 - Project create/update uses backend APIs and reloads backend data.
 - Project Economics uses `Project/GetProjectEconomics` and does not recompute authoritative economics from mock data.
 - Project Payments and Project Contract Periods are Admin-only, payment-type-specific and backend-backed for list/create/update/delete.
-- Project Milestones list/write flows use backend project data/endpoints.
+- Project Milestones are read from backend Project Detail for all employee users; milestone write flows remain Admin-only.
 - Project Detail Work Items tab uses `WorkItem/GetWorkItems` filtered by `projectId` and `includeClosed=true`.
 - Project Detail Time Entries tab uses `TimeEntry/GetTimeEntries` filtered by `projectId`.
 - Global Time Entries, Add Time, normal TimeEntry update and Admin ApprovedTime use `TimeEntry/GetTimeEntries`, `TimeEntry/CreateTimeEntry`, `TimeEntry/UpdateTimeEntry` and `TimeEntry/UpdateApprovedTime`.
 - My Day uses `TimeEntry/GetTimeEntries`, `LeaveRequest/GetLeaveRequests`, `LeaveRequest/CreateLeaveRequest`, assigned Work Items from `WorkItem/GetWorkItems`, and `TimeCompleteness/GetTimeCompleteness` for backend-owned daily summary.
 - Approvals uses `LeaveRequest/GetLeaveRequests`, `LeaveRequest/ApproveLeaveRequest`, `LeaveRequest/RejectLeaveRequest`, `OvertimeRequest/GetOvertimeRequests`, `OvertimeRequest/GetOvertimeRequest`, `OvertimeRequest/ApproveOvertimeRequest` and `OvertimeRequest/RejectOvertimeRequest` for leave/permission and overtime approval workflows.
 - Time Completeness uses `TimeCompleteness/GetTimeCompleteness` for backend-owned expected, worked, approved leave, missing and overtime status values.
-- TimeEntry and Project detail DTO mappings hide ApprovedTime, AdminNote, employee level snapshots, rate snapshots, calculated values and billing fields from non-admin responses at the backend layer.
+- Customer Reports uses `Report/GetCustomerReport` for backend-owned customer/date/project report rows and totals.
+- TimeEntry, LeaveRequest and Project DTO mappings hide ApprovedTime, AdminNote, employee level snapshots, rate snapshots, calculated values, project payment type and billing fields from non-admin responses at the backend layer.
 - Work Item row/card navigation opens the API-backed Work Item Detail route, which loads read-only data through `WorkItem/GetWorkItem`.
 - Global Work Items uses `WorkItem/GetWorkItems` with backend filters for search, project, customer, assignee, unassigned-only, status key, priority and include-closed.
 - Work Item create/update/status-change uses `WorkItem/CreateWorkItem` and `WorkItem/UpdateWorkItem` for Admin users. Status selection comes from active `StatusConfig` records, assignees come from active Employees, and successful saves reload the API-backed list/detail.
@@ -157,13 +158,13 @@ API-backed:
 - Leave request creation and approvals;
 - Overtime approvals;
 - Time Completeness;
+- Customer Reports;
 - TimeEntry update;
 - Admin ApprovedTime editing.
 
 Mock-only/pending:
 
 - Work Item comments retrieval UI;
-- Reports;
 - Dashboard.
 
 Mock data should remain for the pending pages. Removing it now would break pages intentionally outside this phase.
@@ -179,7 +180,7 @@ Mock data should remain for the pending pages. Removing it now would break pages
 - Fixed final-set invariant validation in `StatusConfigService.UpdateStatusConfig`.
 - Updated stale documentation in `frontend-mock-model.md`, `application-layer.md`, `current-state-audit.md` and `frontend-auth-cognito.md`.
 - Updated stale Annual retainer dialog text.
-- Updated `current-state-audit.md` test count from 125 to 127.
+- Test counts in the audit documents now reflect the current 186-test suite.
 
 ## 10. Issues Intentionally Left Pending
 
@@ -193,17 +194,17 @@ Mock data should remain for the pending pages. Removing it now would break pages
 - MongoDB data migration from legacy WorkItem status fields to `StatusKey`.
 - MongoDB data migration for existing TimeEntry records without denormalized `ProjectId`.
 - Customer portal and customer-specific visibility rules.
-- Reports/Dashboard TimeEntry consumers still use mock data or pending UI.
+- Dashboard TimeEntry consumers still use mock data or pending UI.
 - Work Item comments retrieval UI.
 - Transaction or compensating strategy for multi-step Settings saves.
 
-## 11. Recommended Next Steps Before Work Items
+## 11. Recommended Next Steps Before Dashboard
 
-No additional cleanup is required before starting the next Work Items phase.
+No additional cleanup is required before starting the Dashboard phase.
 
 Recommended order:
 
 1. Add comments retrieval UI after the Jira/comment sync strategy is decided.
 2. Add pagination/origin filtering to `WorkItem/GetWorkItems` before larger datasets.
 3. Add Project Detail Add Work Item shortcut if product flow needs project-context creation.
-4. Continue mock-data replacement with Reports or Dashboard after the approval/completeness flows stabilize.
+4. Continue mock-data replacement with Dashboard after the report and approval/completeness flows stabilize.

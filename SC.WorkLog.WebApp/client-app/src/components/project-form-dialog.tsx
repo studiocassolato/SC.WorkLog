@@ -11,6 +11,7 @@ import {
 } from "helpers/services/worklog-api"
 import { Alert, AlertDescription, AlertTitle } from "components/ui/alert"
 import { Button } from "components/ui/button"
+import { Checkbox } from "components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -84,6 +85,7 @@ export function ProjectFormDialog({ open, project, onOpenChange, onSaved }: Proj
   const [customerId, setCustomerId] = useState("")
   const [paymentType, setPaymentType] = useState<ProjectPaymentType>("TimeAndMaterial")
   const [status, setStatus] = useState<ProjectStatus>("Active")
+  const [isDefault, setIsDefault] = useState(false)
   const [isLoadingCustomers, setIsLoadingCustomers] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -94,6 +96,7 @@ export function ProjectFormDialog({ open, project, onOpenChange, onSaved }: Proj
     setErrorMessage(null)
     setPaymentType(project?.paymentType ?? "TimeAndMaterial")
     setStatus(project?.status ?? "Active")
+    setIsDefault(project?.isDefault ?? false)
     setCustomerId(project?.customerId ?? "")
     setIsLoadingCustomers(true)
 
@@ -131,6 +134,7 @@ export function ProjectFormDialog({ open, project, onOpenChange, onSaved }: Proj
       paymentType,
       status,
       notes: nullableText(formData.get("notes")),
+      isDefault,
       juniorRate: paymentType === "TimeAndMaterial" ? nullableNumber(formData.get("juniorRate")) : null,
       midRate: paymentType === "TimeAndMaterial" ? nullableNumber(formData.get("midRate")) : null,
       seniorRate: paymentType === "TimeAndMaterial" ? nullableNumber(formData.get("seniorRate")) : null,
@@ -207,6 +211,20 @@ export function ProjectFormDialog({ open, project, onOpenChange, onSaved }: Proj
           <div className="space-y-2">
             <Label htmlFor="project-name">Project name</Label>
             <Input id="project-name" name="name" defaultValue={project?.name ?? ""} required />
+          </div>
+
+          <div className="flex items-start gap-3 rounded-md border bg-muted/20 p-3">
+            <Checkbox
+              id="project-is-default"
+              checked={isDefault}
+              onCheckedChange={(checked) => setIsDefault(checked === true)}
+            />
+            <div className="grid gap-1.5 leading-none">
+              <Label htmlFor="project-is-default">Default project for this customer</Label>
+              <p className="text-sm text-muted-foreground">
+                Each customer can have at most one default project.
+              </p>
+            </div>
           </div>
 
           <div className="space-y-2">

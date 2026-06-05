@@ -37,6 +37,7 @@ export function CreateWorkItemDialog({ open, onOpenChange }: CreateWorkItemDialo
   const [statusKey, setStatusKey] = useState<WorkItemStatus>(initialStatusKey)
   const [priority, setPriority] = useState<WorkItemPriority>('Normal')
   const [assigneeId, setAssigneeId] = useState<string>('__unassigned__')
+  const [reporter, setReporter] = useState('')
 
   const handleSubmit = () => {
     if (!title || !projectId) return
@@ -48,6 +49,7 @@ export function CreateWorkItemDialog({ open, onOpenChange }: CreateWorkItemDialo
       statusKey,
       priority,
       assigneeId: assigneeId === '__unassigned__' ? null : assigneeId,
+      reporter: reporter.trim() || null,
       origin: 'Manual',
       externalReference: null,
       openingDate: new Date().toISOString().split('T')[0],
@@ -61,6 +63,7 @@ export function CreateWorkItemDialog({ open, onOpenChange }: CreateWorkItemDialo
     setStatusKey(initialStatusKey)
     setPriority('Normal')
     setAssigneeId('__unassigned__')
+    setReporter('')
     onOpenChange(false)
   }
 
@@ -148,12 +151,23 @@ export function CreateWorkItemDialog({ open, onOpenChange }: CreateWorkItemDialo
                 {employees
                   .filter((e) => e.active)
                   .map((employee) => (
-                    <SelectItem key={employee.id} value={employee.id}>
+                    <SelectItem key={employee.id} value={employee.email}>
                       {employee.firstName} {employee.lastName}
                     </SelectItem>
                   ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="reporter">Reporter email (optional)</Label>
+            <Input
+              id="reporter"
+              type="email"
+              placeholder="reporter@example.com"
+              value={reporter}
+              onChange={(e) => setReporter(e.target.value)}
+            />
           </div>
 
           <div className="space-y-2">

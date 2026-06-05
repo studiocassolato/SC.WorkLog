@@ -98,7 +98,7 @@ const buildWorkItemFilter = ({
   projectFilter,
   search,
   statusFilter,
-  currentEmployeeId,
+  currentUserEmail,
 }: {
   assigneeFilter: AssigneeFilter
   customerFilter: string
@@ -107,7 +107,7 @@ const buildWorkItemFilter = ({
   projectFilter: string
   search: string
   statusFilter: string
-  currentEmployeeId: string | null | undefined
+  currentUserEmail: string | null | undefined
 }): WorkItemFilter => {
   const filter: WorkItemFilter = {
     includeClosed,
@@ -120,8 +120,8 @@ const buildWorkItemFilter = ({
   if (statusFilter !== "all") filter.statusKey = statusFilter
   if (priorityFilter !== "all") filter.priority = priorityFilter as WorkItemPriority
 
-  if (assigneeFilter === "me" && currentEmployeeId) {
-    filter.assigneeId = currentEmployeeId
+  if (assigneeFilter === "me" && currentUserEmail) {
+    filter.assigneeId = currentUserEmail
   } else if (assigneeFilter === "unassigned") {
     filter.unassignedOnly = true
   } else if (assigneeFilter !== "all" && assigneeFilter !== "me") {
@@ -143,7 +143,7 @@ export default function WorkItemsPage() {
   const [priorityFilter, setPriorityFilter] = useState("all")
   const [projectFilter, setProjectFilter] = useState("all")
   const [customerFilter, setCustomerFilter] = useState("all")
-  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>(currentUser?.employeeId && !isAdmin ? "me" : "all")
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>(currentUser?.email && !isAdmin ? "me" : "all")
   const [includeClosed, setIncludeClosed] = useState(false)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [isFormOpen, setIsFormOpen] = useState(false)
@@ -152,11 +152,11 @@ export default function WorkItemsPage() {
 
   useEffect(() => {
     setAssigneeFilter((value) => {
-      if (value === "me" && !currentUser?.employeeId) return "all"
+      if (value === "me" && !currentUser?.email) return "all"
       if (value === "me" && isAdmin) return "all"
       return value
     })
-  }, [currentUser?.employeeId, isAdmin])
+  }, [currentUser?.email, isAdmin])
 
   const filter = useMemo(() => buildWorkItemFilter({
     assigneeFilter,
@@ -166,8 +166,8 @@ export default function WorkItemsPage() {
     projectFilter,
     search,
     statusFilter,
-    currentEmployeeId: currentUser?.employeeId,
-  }), [assigneeFilter, customerFilter, currentUser?.employeeId, includeClosed, priorityFilter, projectFilter, search, statusFilter])
+    currentUserEmail: currentUser?.email,
+  }), [assigneeFilter, customerFilter, currentUser?.email, includeClosed, priorityFilter, projectFilter, search, statusFilter])
 
   const loadReferenceData = useCallback(async () => {
     try {
@@ -236,7 +236,7 @@ export default function WorkItemsPage() {
     setPriorityFilter("all")
     setProjectFilter("all")
     setCustomerFilter("all")
-    setAssigneeFilter(currentUser?.employeeId && !isAdmin ? "me" : "all")
+    setAssigneeFilter(currentUser?.email && !isAdmin ? "me" : "all")
     setIncludeClosed(false)
   }
 
@@ -331,7 +331,7 @@ export default function WorkItemsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All assignees</SelectItem>
-            {currentUser?.employeeId && <SelectItem value="me">Assigned to me</SelectItem>}
+            {currentUser?.email && <SelectItem value="me">Assigned to me</SelectItem>}
             <SelectItem value="unassigned">Unassigned</SelectItem>
             {assigneeOptions.map((assignee) => (
               <SelectItem key={assignee.id} value={assignee.id}>
@@ -470,6 +470,7 @@ export default function WorkItemsPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Priority</TableHead>
                 <TableHead>Assignee</TableHead>
+                <TableHead>Reporter</TableHead>
                 <TableHead>Opened</TableHead>
                 <TableHead>Origin</TableHead>
                 <TableHead className="text-right">Hours</TableHead>
@@ -479,7 +480,7 @@ export default function WorkItemsPage() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={isAdmin ? 11 : 10} className="h-32 text-center">
+                  <TableCell colSpan={isAdmin ? 12 : 11} className="h-32 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <ClipboardList className="h-8 w-8 text-muted-foreground mb-2" />
                       <p className="text-muted-foreground">Loading work items...</p>
@@ -488,7 +489,7 @@ export default function WorkItemsPage() {
                 </TableRow>
               ) : workItems.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={isAdmin ? 11 : 10} className="h-32 text-center">
+                  <TableCell colSpan={isAdmin ? 12 : 11} className="h-32 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <FolderOpen className="h-8 w-8 text-muted-foreground mb-2" />
                       <p className="text-muted-foreground">{loadError ? "Work items are unavailable." : "No work items found"}</p>
@@ -537,6 +538,7 @@ export default function WorkItemsPage() {
                         <span className="text-amber-600 dark:text-amber-400">Unassigned</span>
                       )}
                     </TableCell>
+                    <TableCell className="text-muted-foreground">{item.reporter || "-"}</TableCell>
                     <TableCell>{formatDate(item.openingDate)}</TableCell>
                     <TableCell><Badge variant="outline">{originLabel(item.origin)}</Badge></TableCell>
                     <TableCell className="text-right font-mono tabular-nums">{formatHours(item.loggedHours)}</TableCell>
@@ -614,6 +616,7 @@ export default function WorkItemsPage() {
                     <span className={item.assigneeName ? "" : "text-amber-600"}>{item.assigneeName ?? "Unassigned"}</span>
                   </div>
                   <div className="text-right">Origin: {originLabel(item.origin)}</div>
+                  <div className="col-span-2 truncate">Reporter: {item.reporter || "-"}</div>
                   <div>Opened: {formatDate(item.openingDate)}</div>
                   <div className="text-right">Closed: {formatDate(item.closingDate)}</div>
                 </div>

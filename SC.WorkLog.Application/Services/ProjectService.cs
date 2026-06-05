@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Threading.Tasks;
 using SC.WorkLog.Application.DTO.Common;
 using SC.WorkLog.Application.DTO.ContractPeriods;
@@ -55,14 +56,13 @@ namespace SC.WorkLog.Application.Services
         public async Task<List<ProjectListItemDto>> GetProjectsAsync(WorkLogUserContext userContext)
         {
             var projects = await _projects.Get(x => true, sortOrder: x => x.Name);
-            return await BuildProjectListAsync(projects);
+            return await BuildProjectListAsync(projects, userContext);
         }
 
         public async Task<List<ProjectListItemDto>> SearchProjectsAsync(string search, Guid? customerId, ProjectStatus? status, ProjectPaymentType? paymentType, WorkLogUserContext userContext)
         {
-            var projects = await _projects.Get(x => (!customerId.HasValue || x.CustomerId == customerId.Value)
-                && (!status.HasValue || x.Status == status.Value)
-                && (!paymentType.HasValue || x.PaymentType == paymentType.Value), sortOrder: x => x.Name);
+            var effectivePaymentType = userContext != null && userContext.IsAdmin() ? paymentType : null;
+            var projects = await _projects.Get(BuildProjectSearchPredicate(customerId, status, effectivePaymentType), sortOrder: x => x.Name);
 
             if (!string.IsNullOrWhiteSpace(search))
             {
@@ -70,7 +70,24 @@ namespace SC.WorkLog.Application.Services
                 projects = projects.Where(x => x.Name.ToLowerInvariant().Contains(value)).ToList();
             }
 
-            return await BuildProjectListAsync(projects);
+            return await BuildProjectListAsync(projects, userContext);
+        }
+
+        private static Expression<Func<Project, bool>> BuildProjectSearchPredicate(Guid? customerId, ProjectStatus? status, ProjectPaymentType? paymentType)
+        {
+            var parameter = Expression.Parameter(typeof(Project), "x");
+            Expression body = Expression.Constant(true);
+
+            if (customerId.HasValue)
+                body = Expression.AndAlso(body, Expression.Equal(Expression.Property(parameter, nameof(Project.CustomerId)), Expression.Constant(customerId.Value)));
+
+            if (status.HasValue)
+                body = Expression.AndAlso(body, Expression.Equal(Expression.Property(parameter, nameof(Project.Status)), Expression.Constant(status.Value)));
+
+            if (paymentType.HasValue)
+                body = Expression.AndAlso(body, Expression.Equal(Expression.Property(parameter, nameof(Project.PaymentType)), Expression.Constant(paymentType.Value)));
+
+            return Expression.Lambda<Func<Project, bool>>(body, parameter);
         }
 
         public async Task<ProjectDetailDto> GetProjectDetailAsync(Guid projectId, WorkLogUserContext userContext)
@@ -93,9 +110,10 @@ namespace SC.WorkLog.Application.Services
                 CustomerId = project.CustomerId,
                 Customer = customer == null ? null : MapCustomerListItem(customer),
                 Name = project.Name,
-                PaymentType = project.PaymentType,
+                PaymentType = userContext != null && userContext.IsAdmin() ? project.PaymentType : null,
                 Status = project.Status,
                 Notes = project.Notes,
+                IsDefault = project.IsDefault,
                 JuniorRate = userContext != null && userContext.IsAdmin() ? project.JuniorRate : null,
                 MidRate = userContext != null && userContext.IsAdmin() ? project.MidRate : null,
                 SeniorRate = userContext != null && userContext.IsAdmin() ? project.SeniorRate : null,
@@ -127,7 +145,8 @@ namespace SC.WorkLog.Application.Services
             if (customer == null)
                 throw new ArgumentException("Customer not found.");
 
-            var project = new Project(request.CustomerId, request.Name, request.PaymentType, request.Status, request.Notes, request.JuniorRate, request.MidRate, request.SeniorRate, request.FixedAmount, CurrentUser(userContext));
+            await EnsureSingleDefaultProjectForCustomer(request.CustomerId, null, request.IsDefault);
+            var project = new Project(request.CustomerId, request.Name, request.PaymentType, request.Status, request.Notes, request.JuniorRate, request.MidRate, request.SeniorRate, request.FixedAmount, CurrentUser(userContext), request.IsDefault);
             await _projects.InsertAsync(project);
             return await GetProjectDetailAsync(project.Id, userContext);
         }
@@ -142,7 +161,8 @@ namespace SC.WorkLog.Application.Services
             var customer = await _customers.GetSingleOrDefaultAsync(x => x.Id == request.CustomerId);
             if (customer == null)
                 throw new ArgumentException("Customer not found.");
-            project.Update(request.CustomerId, request.Name, request.PaymentType, request.Status, request.Notes, request.JuniorRate, request.MidRate, request.SeniorRate, request.FixedAmount, CurrentUser(userContext));
+            await EnsureSingleDefaultProjectForCustomer(request.CustomerId, project.Id, request.IsDefault);
+            project.Update(request.CustomerId, request.Name, request.PaymentType, request.Status, request.Notes, request.JuniorRate, request.MidRate, request.SeniorRate, request.FixedAmount, CurrentUser(userContext), request.IsDefault);
             await _projects.InsertOrReplace(project);
             return await GetProjectDetailAsync(project.Id, userContext);
         }
@@ -326,7 +346,19 @@ namespace SC.WorkLog.Application.Services
             return project;
         }
 
-        private async Task<List<ProjectListItemDto>> BuildProjectListAsync(List<Project> projects)
+        private async Task EnsureSingleDefaultProjectForCustomer(Guid customerId, Guid? currentProjectId, bool isDefault)
+        {
+            if (!isDefault)
+                return;
+
+            var existingDefaultProjects = await _projects.Get(x => x.CustomerId == customerId
+                && x.IsDefault
+                && (!currentProjectId.HasValue || x.Id != currentProjectId.Value));
+            if (existingDefaultProjects.Any())
+                throw new ArgumentException("Customer already has a default project.");
+        }
+
+        private async Task<List<ProjectListItemDto>> BuildProjectListAsync(List<Project> projects, WorkLogUserContext userContext)
         {
             if (!projects.Any())
                 return new List<ProjectListItemDto>();
@@ -345,15 +377,16 @@ namespace SC.WorkLog.Application.Services
             var timeEntriesByProjectId = timeEntries.GroupBy(x => x.ProjectId).ToDictionary(x => x.Key, x => x.ToList());
             var statusConfigsByKey = statusConfigs.ToDictionary(x => x.Key);
 
-            return projects.Select(project => MapProjectListItem(project, customersById, workItemsByProjectId, timeEntriesByProjectId, statusConfigsByKey)).ToList();
+            return projects.Select(project => MapProjectListItem(project, customersById, workItemsByProjectId, timeEntriesByProjectId, statusConfigsByKey, userContext)).ToList();
         }
 
-        private static ProjectListItemDto MapProjectListItem(Project project, Dictionary<Guid, Customer> customersById, Dictionary<Guid, List<WorkItem>> workItemsByProjectId, Dictionary<Guid, List<TimeEntry>> timeEntriesByProjectId, Dictionary<string, StatusConfig> statusConfigsByKey)
+        private static ProjectListItemDto MapProjectListItem(Project project, Dictionary<Guid, Customer> customersById, Dictionary<Guid, List<WorkItem>> workItemsByProjectId, Dictionary<Guid, List<TimeEntry>> timeEntriesByProjectId, Dictionary<string, StatusConfig> statusConfigsByKey, WorkLogUserContext userContext)
         {
             workItemsByProjectId.TryGetValue(project.Id, out var projectWorkItems);
             projectWorkItems = projectWorkItems ?? new List<WorkItem>();
             timeEntriesByProjectId.TryGetValue(project.Id, out var projectTimeEntries);
             var loggedHours = (projectTimeEntries ?? new List<TimeEntry>()).Sum(x => x.Time);
+            var isAdmin = userContext != null && userContext.IsAdmin();
 
             return new ProjectListItemDto
             {
@@ -361,8 +394,9 @@ namespace SC.WorkLog.Application.Services
                 CustomerId = project.CustomerId,
                 CustomerName = customersById.TryGetValue(project.CustomerId, out var customer) ? customer.CompanyName : null,
                 Name = project.Name,
-                PaymentType = project.PaymentType,
+                PaymentType = isAdmin ? project.PaymentType : null,
                 Status = project.Status,
+                IsDefault = project.IsDefault,
                 LoggedHours = loggedHours,
                 WorkItemCount = projectWorkItems.Count,
                 OpenWorkItemCount = projectWorkItems.Count(workItem => IsOpenWorkItem(workItem, statusConfigsByKey))
@@ -380,7 +414,7 @@ namespace SC.WorkLog.Application.Services
                 WaitingCustomer = workItems.Count(x => StatusFor(x, statusConfigsByKey).Typology == WorkItemStatusTypology.WaitingCustomer),
                 Closed = workItems.Count(x => StatusFor(x, statusConfigsByKey).Typology == WorkItemStatusTypology.Closed),
                 Archived = workItems.Count(x => StatusFor(x, statusConfigsByKey).Typology == WorkItemStatusTypology.Archived),
-                Unassigned = workItems.Count(x => !x.AssigneeId.HasValue)
+                Unassigned = workItems.Count(x => string.IsNullOrWhiteSpace(x.AssigneeId))
             };
         }
 

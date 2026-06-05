@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using SC.WorkLog.Application.DTO.Common;
@@ -49,10 +50,10 @@ namespace SC.WorkLog.Application.Services
         {
             WorkLogApplicationValidation.RequireAdmin(userContext, nameof(CreateUser));
             await ValidateReferences(request.UserType, request.EmployeeId, request.CustomerId);
-            await EnsureUnique(request.Email, request.CognitoSub, null);
-            var user = new WorkLogUser(request.Email, request.CognitoSub, request.UserType, request.Role, request.EmployeeId, request.CustomerId, request.DisplayName, CurrentUser(userContext));
+            await EnsureUniqueEmail(request.Email, null);
+            var user = new WorkLogUser(request.Email, request.UserType, request.Role, request.EmployeeId, request.CustomerId, request.DisplayName, CurrentUser(userContext));
             if (!request.Active)
-                user.Update(user.Email, user.CognitoSub, user.UserType, user.Role, user.EmployeeId, user.CustomerId, user.DisplayName, false, CurrentUser(userContext));
+                user.Update(user.Email, user.UserType, user.Role, user.EmployeeId, user.CustomerId, user.DisplayName, false, CurrentUser(userContext));
             await _users.InsertAsync(user);
             return await BuildUserDetail(user);
         }
@@ -62,9 +63,9 @@ namespace SC.WorkLog.Application.Services
             WorkLogApplicationValidation.RequireAdmin(userContext, nameof(UpdateUser));
             WorkLogApplicationValidation.Required(request.Id, nameof(request.Id));
             await ValidateReferences(request.UserType, request.EmployeeId, request.CustomerId);
-            await EnsureUnique(request.Email, request.CognitoSub, request.Id);
+            await EnsureUniqueEmail(request.Email, request.Id);
             var user = await GetUserOrThrow(request.Id);
-            user.Update(request.Email, request.CognitoSub, request.UserType, request.Role, request.EmployeeId, request.CustomerId, request.DisplayName, request.Active, CurrentUser(userContext));
+            user.Update(request.Email, request.UserType, request.Role, request.EmployeeId, request.CustomerId, request.DisplayName, request.Active, CurrentUser(userContext));
             await _users.InsertOrReplace(user);
             return await BuildUserDetail(user);
         }
@@ -72,24 +73,13 @@ namespace SC.WorkLog.Application.Services
         public Task<WorkLogUser> GetUserByEmail(string email)
         {
             WorkLogApplicationValidation.Required(email, nameof(email));
-            var normalized = email.Trim();
+            var normalized = NormalizeEmail(email);
             return _users.GetSingleOrDefaultAsync(x => x.Email == normalized);
         }
 
-        public Task<WorkLogUser> GetUserByCognitoSub(string cognitoSub)
+        public async Task<WorkLogUser> ResolveAuthenticatedUser(string email)
         {
-            WorkLogApplicationValidation.Required(cognitoSub, nameof(cognitoSub));
-            var normalized = cognitoSub.Trim();
-            return _users.GetSingleOrDefaultAsync(x => x.CognitoSub == normalized);
-        }
-
-        public async Task<WorkLogUser> ResolveAuthenticatedUser(string cognitoSub, string email)
-        {
-            WorkLogUser user = null;
-            if (!string.IsNullOrWhiteSpace(cognitoSub))
-                user = await GetUserByCognitoSub(cognitoSub);
-            if (user == null && !string.IsNullOrWhiteSpace(email))
-                user = await GetUserByEmail(email);
+            var user = await GetUserByEmail(email);
             if (user == null)
                 throw new ArgumentException("The authenticated Cognito user is not linked to a WorkLog user.");
             if (!user.Active)
@@ -132,20 +122,13 @@ namespace SC.WorkLog.Application.Services
             }
         }
 
-        private async Task EnsureUnique(string email, string cognitoSub, Guid? currentUserId)
+        private async Task EnsureUniqueEmail(string email, Guid? currentUserId)
         {
             WorkLogApplicationValidation.Required(email, nameof(email));
-            var normalizedEmail = email.Trim();
+            var normalizedEmail = NormalizeEmail(email);
             var existingEmail = await _users.GetSingleOrDefaultAsync(x => x.Email == normalizedEmail);
             if (existingEmail != null && existingEmail.Id != currentUserId.GetValueOrDefault())
                 throw new ArgumentException("WorkLog user email must be unique.");
-            if (!string.IsNullOrWhiteSpace(cognitoSub))
-            {
-                var normalizedSub = cognitoSub.Trim();
-                var existingSub = await _users.GetSingleOrDefaultAsync(x => x.CognitoSub == normalizedSub);
-                if (existingSub != null && existingSub.Id != currentUserId.GetValueOrDefault())
-                    throw new ArgumentException("WorkLog user CognitoSub must be unique.");
-            }
         }
 
         private async Task<List<WorkLogUserListItemDto>> BuildUserList(List<WorkLogUser> users)
@@ -165,7 +148,6 @@ namespace SC.WorkLog.Application.Services
             {
                 Id = x.Id,
                 Email = x.Email,
-                CognitoSub = x.CognitoSub,
                 UserType = x.UserType,
                 Role = x.Role,
                 EmployeeId = x.EmployeeId,
@@ -189,7 +171,6 @@ namespace SC.WorkLog.Application.Services
             {
                 Id = user.Id,
                 Email = user.Email,
-                CognitoSub = user.CognitoSub,
                 UserType = user.UserType,
                 Role = user.Role,
                 EmployeeId = user.EmployeeId,
@@ -204,6 +185,11 @@ namespace SC.WorkLog.Application.Services
         private static string CurrentUser(WorkLogUserContext userContext)
         {
             return string.IsNullOrWhiteSpace(userContext?.Email) ? "system" : userContext.Email;
+        }
+
+        private static string NormalizeEmail(string email)
+        {
+            return email.Trim().ToLower(CultureInfo.InvariantCulture);
         }
     }
 }

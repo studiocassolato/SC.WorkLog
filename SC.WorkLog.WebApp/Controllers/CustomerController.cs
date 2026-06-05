@@ -8,7 +8,7 @@ using SC.WorkLog.Domain.Interfaces;
 
 namespace SC.WorkLog.WebApp.Controllers
 {
-    [Authorize(Policy = "AdminOnly")]
+    [Authorize]
     [ApiController]
     [Produces("application/json")]
     [Route("api/[controller]/[action]")]
@@ -43,6 +43,7 @@ namespace SC.WorkLog.WebApp.Controllers
             return Ok(response);
         }
 
+        [Authorize(Policy = "AdminOnly")]
         [HttpPost]
         public async Task<IActionResult> CreateCustomer(CreateCustomerRequest request)
         {
@@ -50,6 +51,7 @@ namespace SC.WorkLog.WebApp.Controllers
             return Ok(response);
         }
 
+        [Authorize(Policy = "AdminOnly")]
         [HttpPost]
         public async Task<IActionResult> UpdateCustomer(UpdateCustomerRequest request)
         {

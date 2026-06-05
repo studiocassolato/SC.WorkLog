@@ -37,6 +37,7 @@ Configured collection models:
 - `WorkItemComment`
 - `StatusConfig`
 - `WorkLogUser`
+- `ExternalImportSyncState`
 
 No `CompanySettings` collection is part of the current scope. Expected daily hours are stored per `Employee`; leave, permission and overtime approvals are handled through workflow/admin records. A minimal company profile for report branding can be introduced later if required.
 
@@ -52,7 +53,13 @@ Existing persisted WorkItem records created with the previous enum-based `Status
 
 Existing persisted TimeEntry records created before `ProjectId` was added need a migration before project/report queries can fully rely on the denormalized field. The migration should load each `TimeEntry.WorkItemId`, read the related `WorkItem.ProjectId`, and write that value to `TimeEntry.ProjectId`. Local/development data can be cleared and reseeded if that is acceptable.
 
+`Project` stores `IsDefault` to mark the customer's default project. `ProjectService` enforces at most one default project per customer on create/update.
+
 `ProjectMilestone` currently follows the domain model as a separate aggregate root and therefore has its own collection. It is not embedded in `Project`.
+
+`WorkItem` can store backend-owned `Jira` metadata for local Jira imports. `TimeEntry` can store backend-owned `Jira` metadata for Tempo/Jira worklog imports. These metadata objects are not frontend-owned DTO fields.
+
+`ExternalImportSyncState` tracks temporary Jira/Tempo import state by source and project key. It can be deleted when Jira is abandoned.
 
 ## MongoDB Registration
 
@@ -106,27 +113,26 @@ Configured indexes:
 
 - `Employee`: unique `Email`.
 - `Customer`: `CompanyName`.
-- `Project`: `CustomerId`, `PaymentType`, `Status`, compound `CustomerId + Status`.
+- `Project`: `CustomerId`, `PaymentType`, `Status`, compound `CustomerId + Status`, compound `CustomerId + IsDefault`.
 - `ProjectMilestone`: `ProjectId`, compound `ProjectId + Date`.
-- `WorkItem`: `ProjectId`, `AssigneeId`, `StatusKey`, `Priority`, compound `ProjectId + StatusKey`, compound `AssigneeId + StatusKey`.
-- `TimeEntry`: `WorkItemId`, `ProjectId`, `Date`, compound `ProjectId + Date`, compound `ProjectId + EmployeeId + Date`, compound `EmployeeId + Date`, compound `WorkItemId + Date`.
+- `WorkItem`: `ProjectId`, `Code`, `AssigneeId`, `StatusKey`, `Priority`, `Jira.IssueId`, `Jira.IssueKey`, compound `ProjectId + StatusKey`, compound `AssigneeId + StatusKey`.
+- `TimeEntry`: `WorkItemId`, `ProjectId`, `Date`, `Jira.TempoWorklogId`, `Jira.JiraWorklogId`, `Jira.IssueKey`, compound `ProjectId + Date`, compound `ProjectId + EmployeeId + Date`, compound `EmployeeId + Date`, compound `WorkItemId + Date`.
 - `ProjectPayment`: compound `ProjectId + PaymentDate`.
 - `ProjectContractPeriod`: compound `ProjectId + StartDate + EndDate`, compound `ProjectId + StartDate`, compound `ProjectId + EndDate`.
 - `LeaveRequest`: compound `EmployeeId + Date`, `Status`, compound `EmployeeId + Status`.
 - `OvertimeRequest`: compound `EmployeeId + Date`, `Status`.
 - `WorkItemComment`: compound `WorkItemId + CreatedAt`.
 - `StatusConfig`: `Order`, `Typology`, `Active`, unique `Key`, unique `Name`.
-- `WorkLogUser`: unique `Email`, unique `CognitoSub`, `UserType`, `Role`, `EmployeeId`, `CustomerId`, `Active`.
+- `WorkLogUser`: unique `Email`, `UserType`, `Role`, `EmployeeId`, `CustomerId`, `Active`.
+- `ExternalImportSyncState`: unique compound `Source + ProjectKey`.
 
 No text/search indexes are configured in this phase.
-
-The current generic index helper does not support sparse unique indexes. `CognitoSub` is therefore configured as a regular unique index; until sparse index support is added, user records should provide a unique Cognito subject when persisted.
 
 ## Intentionally Pending
 
 The following items are intentionally not implemented yet:
 
-- replacement of frontend mock data;
+- Dashboard API integration and replacement of remaining Dashboard mock data;
 - entity-specific repositories;
 - MongoDB collection validators;
 - MongoDB migrations or EF-style relational concepts;

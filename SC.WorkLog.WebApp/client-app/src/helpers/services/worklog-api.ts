@@ -38,7 +38,6 @@ export type CustomerDto = {
 export type WorkLogUserDto = {
   id: string
   email: string
-  cognitoSub: string | null
   userType: WorkLogUserType
   role: WorkLogUserRole
   employeeId: string | null
@@ -107,8 +106,9 @@ export type ProjectListItemDto = {
   customerId: string
   customerName: string | null
   name: string
-  paymentType: ProjectPaymentType
+  paymentType: ProjectPaymentType | null
   status: ProjectStatus
+  isDefault: boolean
   loggedHours: number
   workItemCount: number
   openWorkItemCount: number
@@ -119,9 +119,10 @@ export type ProjectDetailDto = {
   customerId: string
   customer: CustomerDto | null
   name: string
-  paymentType: ProjectPaymentType
+  paymentType: ProjectPaymentType | null
   status: ProjectStatus
   notes: string | null
+  isDefault: boolean
   juniorRate: number | null
   midRate: number | null
   seniorRate: number | null
@@ -146,6 +147,7 @@ export type CreateProjectRequest = {
   paymentType: ProjectPaymentType
   status: ProjectStatus
   notes: string | null
+  isDefault: boolean
   juniorRate: number | null
   midRate: number | null
   seniorRate: number | null
@@ -309,6 +311,7 @@ export type WorkItemListItemDto = {
   priority: WorkItemPriority
   assigneeId: string | null
   assigneeName: string | null
+  reporter: string | null
   origin: WorkItemOrigin
   externalReference: string | null
   openingDate: string
@@ -485,6 +488,36 @@ export type TimeCompletenessFilter = {
   status?: DailyTimeCompletenessStatus
 }
 
+export type CustomerReportWorkItemRowDto = {
+  date: string
+  customerId: string
+  customerName: string | null
+  projectId: string
+  projectName: string | null
+  workItemId: string
+  workItemTitle: string | null
+  hours: number
+  approvedHours: number
+  description: string | null
+}
+
+export type CustomerReportDto = {
+  dateFrom: string
+  dateTo: string
+  customerId: string | null
+  totalHours: number
+  approvedHours: number
+  workedValue: number
+  rows: CustomerReportWorkItemRowDto[]
+}
+
+export type CustomerReportFilter = {
+  customerId: string
+  projectId?: string
+  dateFrom: string
+  dateTo: string
+}
+
 export type CreateWorkItemRequest = {
   code: string | null
   projectId: string
@@ -493,6 +526,7 @@ export type CreateWorkItemRequest = {
   statusKey: string | null
   priority: WorkItemPriority
   assigneeId: string | null
+  reporter: string | null
   origin: WorkItemOrigin
   externalReference: string | null
   openingDate: string
@@ -693,6 +727,11 @@ export const rejectOvertimeRequest = async (request: RejectOvertimeRequestReques
 
 export const getTimeCompleteness = async (filter: TimeCompletenessFilter) => {
   const response = await apiClient.post<TimeCompletenessDto>('/TimeCompleteness/GetTimeCompleteness', filter)
+  return response.data
+}
+
+export const getCustomerReport = async (filter: CustomerReportFilter) => {
+  const response = await apiClient.post<CustomerReportDto>('/Report/GetCustomerReport', filter)
   return response.data
 }
 

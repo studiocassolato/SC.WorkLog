@@ -223,6 +223,7 @@ export default function TimeEntriesPage() {
             priority: "Normal",
             assigneeId: null,
             assigneeName: null,
+            reporter: null,
             origin: "Manual",
             externalReference: null,
             openingDate: editEntry.date,

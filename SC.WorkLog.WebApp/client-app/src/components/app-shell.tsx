@@ -52,7 +52,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, adminOnly: true },
   { label: "My Day", href: "/my-day", icon: Calendar, employeeOnly: true },
-  { label: "Projects", href: "/projects", icon: FolderKanban, adminOnly: true },
+  { label: "Projects", href: "/projects", icon: FolderKanban, employeeOnly: true },
   { label: "Work Items", href: "/work-items", icon: ClipboardList, employeeOnly: true },
   { label: "Time Entries", href: "/time-entries", icon: Clock, employeeOnly: true },
   { label: "Time Completeness", href: "/time-completeness", icon: CheckSquare, adminOnly: true },
@@ -293,6 +293,7 @@ export function MobileBottomNav() {
     ...(isEmployee
       ? [
           { label: "My Day", href: "/my-day", icon: Calendar },
+          { label: "Projects", href: "/projects", icon: FolderKanban },
           { label: "Work Items", href: "/work-items", icon: ClipboardList },
           { label: "Time", href: "/time-entries", icon: Clock },
         ]

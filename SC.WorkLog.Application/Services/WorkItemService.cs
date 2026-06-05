@@ -51,11 +51,12 @@ namespace SC.WorkLog.Application.Services
                 ? statusConfigs.Where(x => x.Typology == filter.StatusTypology.Value).Select(x => x.Key).ToList()
                 : new List<string>();
             var statusKey = string.IsNullOrWhiteSpace(filter.StatusKey) ? null : StatusConfig.NormalizeKey(filter.StatusKey);
+            var assigneeEmail = NormalizeEmail(filter.AssigneeId);
 
             var workItems = await _workItems.Get(x => (!filter.ProjectId.HasValue || x.ProjectId == filter.ProjectId.Value)
                 && (!filter.CustomerId.HasValue || projectIdsForCustomer.Contains(x.ProjectId))
-                && (!filter.AssigneeId.HasValue || x.AssigneeId == filter.AssigneeId.Value)
-                && (!filter.UnassignedOnly || !x.AssigneeId.HasValue)
+                && (assigneeEmail == null || x.AssigneeId == assigneeEmail)
+                && (!filter.UnassignedOnly || string.IsNullOrWhiteSpace(x.AssigneeId))
                 && (statusKey == null || x.StatusKey == statusKey)
                 && (!filter.StatusTypology.HasValue || statusTypologyKeys.Contains(x.StatusKey))
                 && (!filter.Priority.HasValue || x.Priority == filter.Priority.Value)
@@ -64,7 +65,7 @@ namespace SC.WorkLog.Application.Services
             if (!string.IsNullOrWhiteSpace(filter.Search))
             {
                 var value = filter.Search.Trim().ToLowerInvariant();
-                workItems = workItems.Where(x => Contains(x.Code, value) || Contains(x.Title, value) || Contains(x.Description, value)).ToList();
+                workItems = workItems.Where(x => Contains(x.Code, value) || Contains(x.Title, value) || Contains(x.Description, value) || Contains(x.AssigneeId, value) || Contains(x.Reporter, value)).ToList();
             }
 
             return (await BuildWorkItemListAsync(workItems, userContext))
@@ -89,12 +90,12 @@ namespace SC.WorkLog.Application.Services
             var project = await _projects.GetSingleOrDefaultAsync(x => x.Id == request.ProjectId);
             if (project == null)
                 throw new ArgumentException("Project not found.");
-            if (request.AssigneeId.HasValue)
-                await EnsureEmployeeExists(request.AssigneeId.Value);
+            if (!string.IsNullOrWhiteSpace(request.AssigneeId))
+                await EnsureEmployeeExists(request.AssigneeId);
             var statusConfig = await ResolveRequestStatusConfig(request.StatusKey);
 
             var closingDate = statusConfig.IsClosed() ? request.ClosingDate.GetValueOrDefault(DateTime.UtcNow) : (DateTime?)null;
-            var workItem = new WorkItem(request.Code, request.ProjectId, request.Title, request.Description, statusConfig.Key, request.Priority, request.AssigneeId, request.Origin, request.ExternalReference, request.OpeningDate == default(DateTime) ? DateTime.UtcNow : request.OpeningDate, request.IsPriority, CurrentUser(userContext));
+            var workItem = new WorkItem(request.Code, request.ProjectId, request.Title, request.Description, statusConfig.Key, request.Priority, request.AssigneeId, request.Reporter, request.Origin, request.ExternalReference, request.OpeningDate == default(DateTime) ? DateTime.UtcNow : request.OpeningDate, request.IsPriority, CurrentUser(userContext));
             if (closingDate.HasValue)
                 workItem.ChangeStatus(statusConfig.Key, closingDate, CurrentUser(userContext));
             await _workItems.InsertAsync(workItem);
@@ -112,13 +113,13 @@ namespace SC.WorkLog.Application.Services
             if (project == null)
                 throw new ArgumentException("Project not found.");
             var projectChanged = workItem.ProjectId != request.ProjectId;
-            if (request.AssigneeId.HasValue)
-                await EnsureEmployeeExists(request.AssigneeId.Value);
+            if (!string.IsNullOrWhiteSpace(request.AssigneeId))
+                await EnsureEmployeeExists(request.AssigneeId);
             var statusConfig = await ResolveRequestStatusConfig(request.StatusKey);
 
             if (projectChanged)
                 workItem.MoveToProject(request.ProjectId, CurrentUser(userContext));
-            workItem.UpdateDetails(request.Title, request.Description, request.Priority, request.AssigneeId, request.IsPriority, CurrentUser(userContext));
+            workItem.UpdateDetails(request.Title, request.Description, request.Priority, request.AssigneeId, request.Reporter, request.IsPriority, CurrentUser(userContext));
             workItem.ChangeStatus(statusConfig.Key, statusConfig.IsClosed() ? request.ClosingDate.GetValueOrDefault(DateTime.UtcNow) : null, CurrentUser(userContext));
             await _workItems.InsertOrReplace(workItem);
             if (projectChanged)
@@ -146,31 +147,35 @@ namespace SC.WorkLog.Application.Services
                 return new List<WorkItemListItemDto>();
 
             var projectIds = workItems.Select(x => x.ProjectId).Distinct().ToList();
-            var assigneeIds = workItems.Where(x => x.AssigneeId.HasValue).Select(x => x.AssigneeId.Value).Distinct().ToList();
+            var assigneeEmails = workItems.Select(x => NormalizeEmail(x.AssigneeId)).Where(x => x != null).Distinct().ToList();
             var workItemIds = workItems.Select(x => x.Id).Distinct().ToList();
             var statusKeys = workItems.Select(x => x.StatusKey).Distinct().ToList();
 
             var projects = await _projects.Get(x => projectIds.Contains(x.Id));
             var customerIds = projects.Select(x => x.CustomerId).Distinct().ToList();
             var customers = customerIds.Any() ? await _customers.Get(x => customerIds.Contains(x.Id)) : new List<Customer>();
-            var employees = assigneeIds.Any() ? await _employees.Get(x => assigneeIds.Contains(x.Id)) : new List<Employee>();
+            var employees = assigneeEmails.Any() ? await _employees.Get(x => true) : new List<Employee>();
             var timeEntries = await _timeEntries.Get(x => workItemIds.Contains(x.WorkItemId));
             var statuses = statusKeys.Any() ? await _statusConfigs.Get(x => statusKeys.Contains(x.Key)) : new List<StatusConfig>();
 
             var projectsById = projects.ToDictionary(x => x.Id);
             var customersById = customers.ToDictionary(x => x.Id);
-            var employeesById = employees.ToDictionary(x => x.Id);
+            var employeesByEmail = employees
+                .Where(x => NormalizeEmail(x.Email) != null)
+                .GroupBy(x => NormalizeEmail(x.Email))
+                .ToDictionary(x => x.Key, x => x.First());
             var timeEntriesByWorkItemId = timeEntries.GroupBy(x => x.WorkItemId).ToDictionary(x => x.Key, x => x.ToList());
             var statusConfigsByKey = statuses.ToDictionary(x => x.Key);
 
-            return workItems.Select(x => MapListItem(x, projectsById, customersById, employeesById, timeEntriesByWorkItemId, statusConfigsByKey, userContext)).ToList();
+            return workItems.Select(x => MapListItem(x, projectsById, customersById, employeesByEmail, timeEntriesByWorkItemId, statusConfigsByKey, userContext)).ToList();
         }
 
-        private static WorkItemListItemDto MapListItem(WorkItem workItem, Dictionary<Guid, Project> projectsById, Dictionary<Guid, Customer> customersById, Dictionary<Guid, Employee> employeesById, Dictionary<Guid, List<TimeEntry>> timeEntriesByWorkItemId, Dictionary<string, StatusConfig> statusConfigsByKey, WorkLogUserContext userContext)
+        private static WorkItemListItemDto MapListItem(WorkItem workItem, Dictionary<Guid, Project> projectsById, Dictionary<Guid, Customer> customersById, Dictionary<string, Employee> employeesByEmail, Dictionary<Guid, List<TimeEntry>> timeEntriesByWorkItemId, Dictionary<string, StatusConfig> statusConfigsByKey, WorkLogUserContext userContext)
         {
             projectsById.TryGetValue(workItem.ProjectId, out var project);
             var customer = project != null && customersById.TryGetValue(project.CustomerId, out var value) ? value : null;
-            var assignee = workItem.AssigneeId.HasValue && employeesById.TryGetValue(workItem.AssigneeId.Value, out var employee) ? employee : null;
+            var normalizedAssignee = NormalizeEmail(workItem.AssigneeId);
+            var assignee = normalizedAssignee != null && employeesByEmail.TryGetValue(normalizedAssignee, out var employee) ? employee : null;
             var itemTime = timeEntriesByWorkItemId.TryGetValue(workItem.Id, out var entries) ? entries : new List<TimeEntry>();
             var status = statusConfigsByKey.TryGetValue(workItem.StatusKey, out var statusConfig) ? statusConfig : null;
 
@@ -192,6 +197,7 @@ namespace SC.WorkLog.Application.Services
                 Priority = workItem.Priority,
                 AssigneeId = workItem.AssigneeId,
                 AssigneeName = assignee == null ? null : string.Concat(assignee.FirstName, " ", assignee.LastName),
+                Reporter = workItem.Reporter,
                 Origin = workItem.Origin,
                 ExternalReference = workItem.ExternalReference,
                 OpeningDate = workItem.OpeningDate,
@@ -222,6 +228,7 @@ namespace SC.WorkLog.Application.Services
                 Priority = item.Priority,
                 AssigneeId = item.AssigneeId,
                 AssigneeName = item.AssigneeName,
+                Reporter = item.Reporter,
                 Origin = item.Origin,
                 ExternalReference = item.ExternalReference,
                 OpeningDate = item.OpeningDate,
@@ -245,9 +252,11 @@ namespace SC.WorkLog.Application.Services
             await _timeEntries.UpdateManyField(x => x.WorkItemId == workItemId && x.ProjectId != projectId, x => x.ProjectId, projectId);
         }
 
-        private async Task EnsureEmployeeExists(Guid employeeId)
+        private async Task EnsureEmployeeExists(string employeeEmail)
         {
-            var employee = await _employees.GetSingleOrDefaultAsync(x => x.Id == employeeId);
+            var normalizedEmail = NormalizeEmail(employeeEmail);
+            var employees = await _employees.Get(x => true);
+            var employee = employees.FirstOrDefault(x => NormalizeEmail(x.Email) == normalizedEmail);
             if (employee == null)
                 throw new ArgumentException("Employee not found.");
         }
@@ -286,6 +295,11 @@ namespace SC.WorkLog.Application.Services
         private static string CurrentUser(WorkLogUserContext userContext)
         {
             return string.IsNullOrWhiteSpace(userContext?.Email) ? "system" : userContext.Email;
+        }
+
+        private static string NormalizeEmail(string email)
+        {
+            return string.IsNullOrWhiteSpace(email) ? null : email.Trim().ToLowerInvariant();
         }
     }
 }

@@ -165,7 +165,7 @@ public class WorkItemServiceTests
         var context = CreateContext();
         var service = CreateService(context);
         var request = UpdateRequest(context);
-        request.AssigneeId = Guid.NewGuid();
+        request.AssigneeId = "missing@example.com";
 
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateWorkItemAsync(request, AdminUser(context.Employee.Id)));
 
@@ -223,7 +223,7 @@ public class WorkItemServiceTests
     {
         var context = CreateContext();
         var otherProject = new Project(context.Customer.Id, "Other Project", ProjectPaymentType.Internal, ProjectStatus.Active, null, null, null, null, null, "admin");
-        var unrelatedWorkItem = new WorkItem("WL-X", context.Project.Id, "Unrelated", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        var unrelatedWorkItem = new WorkItem("WL-X", context.Project.Id, "Unrelated", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         var unrelatedEntry = new TimeEntry(context.Employee.Id, unrelatedWorkItem.Id, context.Project.Id, DateTime.Today, 2m, 2m, "Unrelated", null, RequestStatus.PendingApproval, null, EmployeeLevel.Senior, 90m, 120m, "admin");
         context.Projects.Items.Add(otherProject);
         context.WorkItems.Items.Add(unrelatedWorkItem);
@@ -297,7 +297,7 @@ public class WorkItemServiceTests
     {
         var context = CreateContext();
         var otherProject = new Project(context.Customer.Id, "Other Project", ProjectPaymentType.Internal, ProjectStatus.Active, null, null, null, null, null, "admin");
-        var otherWorkItem = new WorkItem("WL-OTHER", otherProject.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        var otherWorkItem = new WorkItem("WL-OTHER", otherProject.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         context.Projects.Items.Add(otherProject);
         context.WorkItems.Items.Add(otherWorkItem);
         var service = CreateService(context);
@@ -313,12 +313,12 @@ public class WorkItemServiceTests
     {
         var context = CreateContext();
         var otherEmployee = new Employee("Grace", "Hopper", "grace@example.com", EmployeeLevel.Senior, 100m, 8m, "admin");
-        var otherWorkItem = new WorkItem("WL-OTHER", context.Project.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, otherEmployee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        var otherWorkItem = new WorkItem("WL-OTHER", context.Project.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, otherEmployee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         context.Employees.Items.Add(otherEmployee);
         context.WorkItems.Items.Add(otherWorkItem);
         var service = CreateService(context);
 
-        var items = await service.GetWorkItemsAsync(new WorkItemFilter { AssigneeId = otherEmployee.Id }, AdminUser(context.Employee.Id));
+        var items = await service.GetWorkItemsAsync(new WorkItemFilter { AssigneeId = otherEmployee.Email }, AdminUser(context.Employee.Id));
 
         var item = Assert.Single(items);
         Assert.Equal(otherWorkItem.Id, item.Id);
@@ -358,7 +358,7 @@ public class WorkItemServiceTests
     public async Task GetWorkItemsAsync_WithUnassignedOnly_ReturnsOnlyUnassignedItems()
     {
         var context = CreateContext();
-        var unassigned = new WorkItem("WL-UNASSIGNED", context.Project.Id, "Unassigned task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        var unassigned = new WorkItem("WL-UNASSIGNED", context.Project.Id, "Unassigned task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, null, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         context.WorkItems.Items.Add(unassigned);
         var service = CreateService(context);
 
@@ -436,7 +436,7 @@ public class WorkItemServiceTests
         context.Project = new Project(context.Customer.Id, "Project", ProjectPaymentType.TimeAndMaterial, ProjectStatus.Active, null, 60m, 90m, 120m, null, "admin");
         context.NewStatus = new StatusConfig("new", "New", WorkItemStatusTypology.New, "New", 10, true, "admin");
         context.ClosedStatus = new StatusConfig("closed", "Closed", WorkItemStatusTypology.Closed, "Closed", 90, true, "admin");
-        context.WorkItem = new WorkItem("WL-1", context.Project.Id, "Task", "Task description", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        context.WorkItem = new WorkItem("WL-1", context.Project.Id, "Task", "Task description", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         context.Employees.Items.Add(context.Employee);
         context.Customers.Items.Add(context.Customer);
         context.Projects.Items.Add(context.Project);
@@ -461,7 +461,8 @@ public class WorkItemServiceTests
             Description = "Created by admin",
             StatusKey = context.NewStatus.Key,
             Priority = WorkItemPriority.Normal,
-            AssigneeId = context.Employee.Id,
+            AssigneeId = context.Employee.Email,
+            Reporter = "reporter@example.com",
             Origin = WorkItemOrigin.Manual,
             OpeningDate = DateTime.Today
         };
@@ -478,7 +479,8 @@ public class WorkItemServiceTests
             Description = context.WorkItem.Description,
             StatusKey = context.WorkItem.StatusKey,
             Priority = context.WorkItem.Priority,
-            AssigneeId = context.Employee.Id,
+            AssigneeId = context.Employee.Email,
+            Reporter = context.WorkItem.Reporter,
             Origin = context.WorkItem.Origin,
             OpeningDate = context.WorkItem.OpeningDate,
             IsPriority = context.WorkItem.IsPriority

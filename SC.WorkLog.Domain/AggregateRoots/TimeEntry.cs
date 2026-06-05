@@ -20,6 +20,7 @@ namespace SC.WorkLog.Domain.AggregateRoots
         public EmployeeLevel EmployeeLevelSnapshot { get; private set; }
         public decimal EmployeeDefaultRateSnapshot { get; private set; }
         public decimal ProjectRateSnapshot { get; private set; }
+        public TimeEntryJiraMetadata Jira { get; private set; }
 
         private TimeEntry()
         {
@@ -30,8 +31,8 @@ namespace SC.WorkLog.Domain.AggregateRoots
             WorkLogDomainValidation.Required(employeeId, nameof(EmployeeId));
             WorkLogDomainValidation.Required(workItemId, nameof(WorkItemId));
             WorkLogDomainValidation.Required(projectId, nameof(ProjectId));
-            WorkLogDomainValidation.HalfHourIncrement(time, nameof(Time));
-            WorkLogDomainValidation.HalfHourIncrement(approvedTime, nameof(ApprovedTime));
+            WorkLogDomainValidation.Positive(time, nameof(Time));
+            WorkLogDomainValidation.NonNegative(approvedTime, nameof(ApprovedTime));
             WorkLogDomainValidation.NonNegative(employeeDefaultRateSnapshot, nameof(EmployeeDefaultRateSnapshot));
             WorkLogDomainValidation.NonNegative(projectRateSnapshot, nameof(ProjectRateSnapshot));
             WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
@@ -54,13 +55,39 @@ namespace SC.WorkLog.Domain.AggregateRoots
 
         public void UpdateLoggedTime(DateTime date, decimal time, string description, string notes, string currentUser)
         {
-            WorkLogDomainValidation.HalfHourIncrement(time, nameof(Time));
+            WorkLogDomainValidation.Positive(time, nameof(Time));
             WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
 
             Date = date.Date;
             Time = time;
             Description = description;
             Notes = notes;
+            AuditInfo.Update(currentUser);
+        }
+
+        public void UpdateFromJiraImport(Guid employeeId, Guid workItemId, Guid projectId, DateTime date, decimal time, string description, string notes, EmployeeLevel employeeLevelSnapshot, decimal employeeDefaultRateSnapshot, decimal projectRateSnapshot, TimeEntryJiraMetadata jira, string currentUser)
+        {
+            WorkLogDomainValidation.Required(employeeId, nameof(EmployeeId));
+            WorkLogDomainValidation.Required(workItemId, nameof(WorkItemId));
+            WorkLogDomainValidation.Required(projectId, nameof(ProjectId));
+            WorkLogDomainValidation.Positive(time, nameof(Time));
+            WorkLogDomainValidation.NonNegative(employeeDefaultRateSnapshot, nameof(EmployeeDefaultRateSnapshot));
+            WorkLogDomainValidation.NonNegative(projectRateSnapshot, nameof(ProjectRateSnapshot));
+            WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
+
+            EmployeeId = employeeId;
+            WorkItemId = workItemId;
+            ProjectId = projectId;
+            Date = date.Date;
+            Time = time;
+            ApprovedTime = time;
+            Description = description;
+            Notes = notes;
+            Status = RequestStatus.PendingApproval;
+            EmployeeLevelSnapshot = employeeLevelSnapshot;
+            EmployeeDefaultRateSnapshot = employeeDefaultRateSnapshot;
+            ProjectRateSnapshot = projectRateSnapshot;
+            Jira = jira;
             AuditInfo.Update(currentUser);
         }
 

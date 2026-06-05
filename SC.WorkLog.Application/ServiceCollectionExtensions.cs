@@ -2,8 +2,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SC.WorkLog.Application.EventHandlers;
 using SC.WorkLog.Application.Services;
+using SC.WorkLog.Application.Services.ExternalImport;
 using SC.WorkLog.Common.Settings;
 using SC.WorkLog.Domain.Interfaces;
+using SC.WorkLog.Infrastructure.ExternalImport;
 using SC.WorkLog.Infrastructure.Repository;
 
 namespace SC.WorkLog.Application
@@ -27,6 +29,15 @@ namespace SC.WorkLog.Application
             services.AddScoped<TimeCompletenessService>();
             services.AddScoped<WorkLogUserService>();
             services.AddScoped<StatusConfigService>();
+            services.AddScoped<JiraImportService>();
+            services.AddSingleton(_ =>
+            {
+                var settings = new LocalJiraTempoImportSettings();
+                configuration.GetSection(nameof(LocalJiraTempoImportSettings)).Bind(settings);
+                return settings;
+            });
+            services.AddScoped<IJiraApiClient, JiraApiClient>();
+            services.AddScoped<ITempoApiClient, TempoApiClient>();
         }
 
         public static void AddApplicationPolicies(this IServiceCollection services)

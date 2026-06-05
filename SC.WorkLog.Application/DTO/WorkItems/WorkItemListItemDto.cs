@@ -19,8 +19,9 @@ namespace SC.WorkLog.Application.DTO.WorkItems
         public string CustomerDisplayName { get; set; }
         public bool IsClosed { get; set; }
         public WorkItemPriority Priority { get; set; }
-        public Guid? AssigneeId { get; set; }
+        public string AssigneeId { get; set; }
         public string AssigneeName { get; set; }
+        public string Reporter { get; set; }
         public WorkItemOrigin Origin { get; set; }
         public string ExternalReference { get; set; }
         public DateTime OpeningDate { get; set; }

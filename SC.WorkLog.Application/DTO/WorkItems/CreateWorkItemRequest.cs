@@ -11,7 +11,8 @@ namespace SC.WorkLog.Application.DTO.WorkItems
         public string Description { get; set; }
         public string StatusKey { get; set; }
         public WorkItemPriority Priority { get; set; }
-        public Guid? AssigneeId { get; set; }
+        public string AssigneeId { get; set; }
+        public string Reporter { get; set; }
         public WorkItemOrigin Origin { get; set; }
         public string ExternalReference { get; set; }
         public DateTime OpeningDate { get; set; }

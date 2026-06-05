@@ -32,7 +32,7 @@ namespace SC.WorkLog.Application.Services
                 && (!filter.DateTo.HasValue || x.Date <= filter.DateTo.Value.Date)
                 && (!filter.Status.HasValue || x.Status == filter.Status.Value), sortOrder: x => x.Date, sortDescending: true);
 
-            return await BuildLeaveRequestListAsync(requests);
+            return await BuildLeaveRequestListAsync(requests, userContext);
         }
 
         public async Task<LeaveRequestDto> CreateLeaveRequestAsync(CreateLeaveRequestRequest request, WorkLogUserContext userContext)
@@ -45,7 +45,7 @@ namespace SC.WorkLog.Application.Services
             await GetActiveEmployeeOrThrow(request.EmployeeId);
             var leaveRequest = new LeaveRequest(request.EmployeeId, request.Type, request.Date, request.Hours, request.EmployeeNote, CurrentUser(userContext));
             await _leaveRequests.InsertAsync(leaveRequest);
-            return await BuildLeaveRequestDtoAsync(leaveRequest);
+            return await BuildLeaveRequestDtoAsync(leaveRequest, userContext);
         }
 
         public async Task<LeaveRequestDto> ApproveLeaveRequestAsync(ApproveLeaveRequestRequest request, WorkLogUserContext userContext)
@@ -55,7 +55,7 @@ namespace SC.WorkLog.Application.Services
             var leaveRequest = await GetLeaveRequestOrThrow(request.Id);
             leaveRequest.Approve(request.AdminNote, CurrentUser(userContext));
             await _leaveRequests.InsertOrReplace(leaveRequest);
-            return await BuildLeaveRequestDtoAsync(leaveRequest);
+            return await BuildLeaveRequestDtoAsync(leaveRequest, userContext);
         }
 
         public async Task<LeaveRequestDto> RejectLeaveRequestAsync(RejectLeaveRequestRequest request, WorkLogUserContext userContext)
@@ -65,7 +65,7 @@ namespace SC.WorkLog.Application.Services
             var leaveRequest = await GetLeaveRequestOrThrow(request.Id);
             leaveRequest.Reject(request.AdminNote, CurrentUser(userContext));
             await _leaveRequests.InsertOrReplace(leaveRequest);
-            return await BuildLeaveRequestDtoAsync(leaveRequest);
+            return await BuildLeaveRequestDtoAsync(leaveRequest, userContext);
         }
 
         private async Task<LeaveRequest> GetLeaveRequestOrThrow(Guid leaveRequestId)
@@ -98,24 +98,25 @@ namespace SC.WorkLog.Application.Services
                 throw new ArgumentException("Leave request type is invalid.");
         }
 
-        private async Task<List<LeaveRequestDto>> BuildLeaveRequestListAsync(List<LeaveRequest> requests)
+        private async Task<List<LeaveRequestDto>> BuildLeaveRequestListAsync(List<LeaveRequest> requests, WorkLogUserContext userContext)
         {
             var employeeIds = requests.Select(x => x.EmployeeId).Distinct().ToList();
             var employees = employeeIds.Any() ? await _employees.Get(x => employeeIds.Contains(x.Id)) : new List<Employee>();
             var employeesById = employees.ToDictionary(x => x.Id);
-            return requests.Select(x => MapLeaveRequest(x, employeesById)).ToList();
+            return requests.Select(x => MapLeaveRequest(x, employeesById, userContext)).ToList();
         }
 
-        private async Task<LeaveRequestDto> BuildLeaveRequestDtoAsync(LeaveRequest request)
+        private async Task<LeaveRequestDto> BuildLeaveRequestDtoAsync(LeaveRequest request, WorkLogUserContext userContext)
         {
             var employee = await _employees.GetSingleOrDefaultAsync(x => x.Id == request.EmployeeId);
             var employeesById = employee == null ? new Dictionary<Guid, Employee>() : new Dictionary<Guid, Employee> { { employee.Id, employee } };
-            return MapLeaveRequest(request, employeesById);
+            return MapLeaveRequest(request, employeesById, userContext);
         }
 
-        private static LeaveRequestDto MapLeaveRequest(LeaveRequest request, Dictionary<Guid, Employee> employeesById)
+        private static LeaveRequestDto MapLeaveRequest(LeaveRequest request, Dictionary<Guid, Employee> employeesById, WorkLogUserContext userContext)
         {
             employeesById.TryGetValue(request.EmployeeId, out var employee);
+            var isAdmin = userContext != null && userContext.IsAdmin();
             return new LeaveRequestDto
             {
                 Id = request.Id,
@@ -127,7 +128,7 @@ namespace SC.WorkLog.Application.Services
                 Status = request.Status,
                 RequestDate = request.RequestDate,
                 EmployeeNote = request.EmployeeNote,
-                AdminNote = request.AdminNote
+                AdminNote = isAdmin ? request.AdminNote : null
             };
         }
 

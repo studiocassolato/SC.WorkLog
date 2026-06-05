@@ -12,7 +12,7 @@ Authorization: Bearer <id-token>
 ```
 
 3. `SC.WorkLog.WebApp` validates the token with ASP.NET Core JWT Bearer authentication.
-4. During token validation, the backend resolves the WorkLog application user by Cognito subject or email.
+4. During token validation, the backend resolves the WorkLog application user by email.
 5. Server-side claims are added for WorkLog user id, user type, role and linked employee/customer ids.
 
 Frontend role switching is demo-only and is never trusted by the backend.
@@ -58,7 +58,6 @@ The frontend sends Cognito ID tokens to the backend so profile claims such as `e
 The backend maps Cognito users to `WorkLogUser` using:
 
 ```text
-sub claim -> WorkLogUser.CognitoSub
 email claim -> WorkLogUser.Email
 ```
 

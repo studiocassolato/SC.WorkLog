@@ -48,7 +48,7 @@ public class WorkLogApplicationValidationTests
     {
         var context = CreateContext();
         var otherProject = new Project(context.Customer.Id, "Other project", ProjectPaymentType.TimeAndMaterial, ProjectStatus.Active, null, 60m, 90m, 120m, null, "admin");
-        var otherWorkItem = new WorkItem("WL-2", otherProject.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        var otherWorkItem = new WorkItem("WL-2", otherProject.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         context.Projects.Items.Add(otherProject);
         context.WorkItems.Items.Add(otherWorkItem);
         var service = CreateTimeEntryService(context);
@@ -193,7 +193,7 @@ public class WorkLogApplicationValidationTests
         var context = CreateContext();
         var entry = AddTimeEntry(context, 2m);
         var otherProject = new Project(context.Customer.Id, "Other project", ProjectPaymentType.TimeAndMaterial, ProjectStatus.Active, null, 50m, 75m, 150m, null, "admin");
-        var otherWorkItem = new WorkItem("WL-2", otherProject.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        var otherWorkItem = new WorkItem("WL-2", otherProject.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         context.Projects.Items.Add(otherProject);
         context.WorkItems.Items.Add(otherWorkItem);
         var service = CreateTimeEntryService(context);
@@ -1109,7 +1109,9 @@ public class WorkLogApplicationValidationTests
         var otherEmployee = new Employee("Grace", "Hopper", "grace@example.com", EmployeeLevel.Senior, 90m, 8m, "admin");
         context.Employees.Items.Add(otherEmployee);
         var ownLeave = new LeaveRequest(context.Employee.Id, LeaveRequestType.Vacation, DateTime.Today, 8m, "Own", "employee");
+        ownLeave.Approve("Admin-only note", "admin");
         var otherLeave = new LeaveRequest(otherEmployee.Id, LeaveRequestType.Permission, DateTime.Today.AddDays(1), 2m, "Other", "employee");
+        otherLeave.Reject("Visible to admin", "admin");
         context.LeaveRequests.Items.Add(ownLeave);
         context.LeaveRequests.Items.Add(otherLeave);
         var service = new LeaveRequestService(context.LeaveRequests, context.Employees);
@@ -1117,8 +1119,27 @@ public class WorkLogApplicationValidationTests
         var employeeRows = await service.GetLeaveRequestsAsync(new LeaveRequestFilter { EmployeeId = otherEmployee.Id }, EmployeeUser(context.Employee.Id));
         var adminRows = await service.GetLeaveRequestsAsync(new LeaveRequestFilter { EmployeeId = otherEmployee.Id, Type = LeaveRequestType.Permission }, AdminUser());
 
-        Assert.Equal(ownLeave.Id, Assert.Single(employeeRows).Id);
-        Assert.Equal(otherLeave.Id, Assert.Single(adminRows).Id);
+        var employeeRow = Assert.Single(employeeRows);
+        var adminRow = Assert.Single(adminRows);
+        Assert.Equal(ownLeave.Id, employeeRow.Id);
+        Assert.Null(employeeRow.AdminNote);
+        Assert.Equal(otherLeave.Id, adminRow.Id);
+        Assert.Equal("Visible to admin", adminRow.AdminNote);
+    }
+
+    [Fact]
+    public async Task CustomerService_ReadsAreAvailableToEmployeeUsers()
+    {
+        var context = CreateContext();
+        var service = new CustomerService(context.Customers);
+
+        var customers = await service.GetCustomersAsync(EmployeeUser(context.Employee.Id));
+        var searchResults = await service.SearchCustomersAsync(context.Customer.CompanyName, EmployeeUser(context.Employee.Id));
+        var customer = await service.GetCustomerDetailAsync(context.Customer.Id, EmployeeUser(context.Employee.Id));
+
+        Assert.Equal(context.Customer.Id, Assert.Single(customers).Id);
+        Assert.Equal(context.Customer.Id, Assert.Single(searchResults).Id);
+        Assert.Equal(context.Customer.Id, customer.Id);
     }
 
     [Fact]
@@ -1259,6 +1280,35 @@ public class WorkLogApplicationValidationTests
     }
 
     [Fact]
+    public async Task ProjectService_ProjectList_WithEmployeeUser_HidesPaymentTypeAndIgnoresPaymentTypeFilter()
+    {
+        var context = CreateContext(ProjectPaymentType.TimeAndMaterial);
+        var otherProject = new Project(context.Customer.Id, "Fixed project", ProjectPaymentType.FixedPrice, ProjectStatus.Active, null, null, null, null, 1000m, "admin");
+        context.Projects.Items.Add(otherProject);
+        var service = CreateProjectService(context);
+
+        var projects = await service.SearchProjectsAsync(null, context.Customer.Id, null, ProjectPaymentType.FixedPrice, EmployeeUser(context.Employee.Id));
+
+        Assert.Equal(2, projects.Count);
+        Assert.All(projects, project => Assert.Null(project.PaymentType));
+    }
+
+    [Fact]
+    public async Task ProjectService_SearchProjects_FiltersByStatus()
+    {
+        var context = CreateContext(ProjectPaymentType.TimeAndMaterial);
+        var suspendedProject = new Project(context.Customer.Id, "Suspended project", ProjectPaymentType.TimeAndMaterial, ProjectStatus.Suspended, null, 50m, 75m, 100m, null, "admin");
+        context.Projects.Items.Add(suspendedProject);
+        var service = CreateProjectService(context);
+
+        var projects = await service.SearchProjectsAsync(null, context.Customer.Id, ProjectStatus.Suspended, null, AdminUser());
+
+        var project = Assert.Single(projects);
+        Assert.Equal(suspendedProject.Id, project.Id);
+        Assert.Equal(ProjectStatus.Suspended, project.Status);
+    }
+
+    [Fact]
     public async Task ProjectDetail_UsesOnlySelectedProjectTimeEntries()
     {
         var context = CreateContext();
@@ -1280,6 +1330,7 @@ public class WorkLogApplicationValidationTests
 
         var detail = await service.GetProjectDetailAsync(context.Project.Id, EmployeeUser(context.Employee.Id));
 
+        Assert.Null(detail.PaymentType);
         Assert.Null(detail.JuniorRate);
         Assert.Null(detail.MidRate);
         Assert.Null(detail.SeniorRate);
@@ -1356,6 +1407,73 @@ public class WorkLogApplicationValidationTests
     }
 
     [Fact]
+    public async Task CreateProjectAsync_SetsDefaultProjectAndRejectsSecondDefaultForCustomer()
+    {
+        var context = CreateContext();
+        var service = CreateProjectService(context);
+
+        var defaultProject = await service.CreateProjectAsync(new CreateProjectRequest
+        {
+            CustomerId = context.Customer.Id,
+            Name = "Default project",
+            PaymentType = ProjectPaymentType.Internal,
+            Status = ProjectStatus.Active,
+            IsDefault = true
+        }, AdminUser());
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.CreateProjectAsync(new CreateProjectRequest
+        {
+            CustomerId = context.Customer.Id,
+            Name = "Second default project",
+            PaymentType = ProjectPaymentType.Internal,
+            Status = ProjectStatus.Active,
+            IsDefault = true
+        }, AdminUser()));
+        var projects = await service.GetProjectsAsync(AdminUser());
+
+        Assert.True(defaultProject.IsDefault);
+        Assert.Contains("default project", exception.Message);
+        Assert.Single(projects, project => project.IsDefault);
+    }
+
+    [Fact]
+    public async Task UpdateProjectAsync_AllowsSameDefaultProjectAndRejectsConflictingDefault()
+    {
+        var context = CreateContext();
+        context.Project.Update(context.Customer.Id, context.Project.Name, context.Project.PaymentType, context.Project.Status, context.Project.Notes, context.Project.JuniorRate, context.Project.MidRate, context.Project.SeniorRate, context.Project.FixedAmount, "admin", true);
+        var otherProject = new Project(context.Customer.Id, "Other project", ProjectPaymentType.Internal, ProjectStatus.Active, null, null, null, null, null, "admin");
+        context.Projects.Items.Add(otherProject);
+        var service = CreateProjectService(context);
+
+        var updatedDefault = await service.UpdateProjectAsync(new UpdateProjectRequest
+        {
+            Id = context.Project.Id,
+            CustomerId = context.Customer.Id,
+            Name = context.Project.Name,
+            PaymentType = context.Project.PaymentType,
+            Status = context.Project.Status,
+            Notes = context.Project.Notes,
+            JuniorRate = context.Project.JuniorRate,
+            MidRate = context.Project.MidRate,
+            SeniorRate = context.Project.SeniorRate,
+            FixedAmount = context.Project.FixedAmount,
+            IsDefault = true
+        }, AdminUser());
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateProjectAsync(new UpdateProjectRequest
+        {
+            Id = otherProject.Id,
+            CustomerId = context.Customer.Id,
+            Name = otherProject.Name,
+            PaymentType = otherProject.PaymentType,
+            Status = otherProject.Status,
+            IsDefault = true
+        }, AdminUser()));
+
+        Assert.True(updatedDefault.IsDefault);
+        Assert.Contains("default project", exception.Message);
+    }
+
+    [Fact]
     public async Task CreateProjectAsync_WithEmployeeUserThrowsArgumentException()
     {
         var context = CreateContext();
@@ -1421,6 +1539,104 @@ public class WorkLogApplicationValidationTests
 
         Assert.Single(report.Rows);
         Assert.Equal(2m, report.TotalHours);
+    }
+
+    [Fact]
+    public async Task CustomerReport_RequiresAdminCustomerAndValidDateRange()
+    {
+        var context = CreateContext();
+        var reportService = CreateProjectReportService(context);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => reportService.GetCustomerReportAsync(new CustomerReportFilter
+        {
+            CustomerId = context.Customer.Id,
+            DateFrom = DateTime.Today,
+            DateTo = DateTime.Today
+        }, EmployeeUser(context.Employee.Id)));
+        await Assert.ThrowsAsync<ArgumentException>(() => reportService.GetCustomerReportAsync(new CustomerReportFilter
+        {
+            DateFrom = DateTime.Today,
+            DateTo = DateTime.Today
+        }, AdminUser()));
+        await Assert.ThrowsAsync<ArgumentException>(() => reportService.GetCustomerReportAsync(new CustomerReportFilter
+        {
+            CustomerId = context.Customer.Id,
+            DateTo = DateTime.Today
+        }, AdminUser()));
+        await Assert.ThrowsAsync<ArgumentException>(() => reportService.GetCustomerReportAsync(new CustomerReportFilter
+        {
+            CustomerId = context.Customer.Id,
+            DateFrom = DateTime.Today,
+            DateTo = DateTime.Today.AddDays(-1)
+        }, AdminUser()));
+    }
+
+    [Fact]
+    public async Task CustomerReport_UsesApprovedTimeAndRequestedDateRange()
+    {
+        var context = CreateContext();
+        AddTimeEntry(context, 4m, approvedTime: 2m, date: DateTime.Today);
+        AddTimeEntry(context, 8m, approvedTime: 8m, date: DateTime.Today.AddDays(-10));
+        var reportService = CreateProjectReportService(context);
+
+        var report = await reportService.GetCustomerReportAsync(new CustomerReportFilter
+        {
+            CustomerId = context.Customer.Id,
+            DateFrom = DateTime.Today,
+            DateTo = DateTime.Today
+        }, AdminUser());
+
+        Assert.Equal(4m, report.TotalHours);
+        Assert.Equal(2m, report.ApprovedHours);
+        Assert.Equal(240m, report.WorkedValue);
+        Assert.Equal(2m, Assert.Single(report.Rows).ApprovedHours);
+    }
+
+    [Fact]
+    public async Task CustomerReport_ProjectFilterCannotEscapeSelectedCustomer()
+    {
+        var context = CreateContext();
+        var otherCustomer = new Customer("Other", "other.test", "Other", "other@example.com", null, "admin");
+        var otherProject = new Project(otherCustomer.Id, "Other project", ProjectPaymentType.TimeAndMaterial, ProjectStatus.Active, null, 60m, 90m, 120m, null, "admin");
+        var otherWorkItem = new WorkItem("WL-X", otherProject.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        context.Customers.Items.Add(otherCustomer);
+        context.Projects.Items.Add(otherProject);
+        context.WorkItems.Items.Add(otherWorkItem);
+        context.TimeEntries.Items.Add(new TimeEntry(context.Employee.Id, otherWorkItem.Id, otherProject.Id, DateTime.Today, 10m, 10m, "Other", null, RequestStatus.PendingApproval, null, context.Employee.Level, context.Employee.DefaultHourlyRate, 120m, "employee"));
+        var reportService = CreateProjectReportService(context);
+
+        var report = await reportService.GetCustomerReportAsync(new CustomerReportFilter
+        {
+            CustomerId = context.Customer.Id,
+            ProjectId = otherProject.Id,
+            DateFrom = DateTime.Today,
+            DateTo = DateTime.Today
+        }, AdminUser());
+
+        Assert.Empty(report.Rows);
+        Assert.Equal(0m, report.TotalHours);
+        Assert.Equal(context.Customer.Id, report.CustomerId);
+    }
+
+    [Fact]
+    public async Task CustomerReport_EmptyCustomerData_ReturnsValidEmptyReport()
+    {
+        var context = CreateContext();
+        var emptyCustomer = new Customer("Empty", "empty.test", "Empty", "empty@example.com", null, "admin");
+        context.Customers.Items.Add(emptyCustomer);
+        var reportService = CreateProjectReportService(context);
+
+        var report = await reportService.GetCustomerReportAsync(new CustomerReportFilter
+        {
+            CustomerId = emptyCustomer.Id,
+            DateFrom = DateTime.Today,
+            DateTo = DateTime.Today
+        }, AdminUser());
+
+        Assert.Empty(report.Rows);
+        Assert.Equal(emptyCustomer.Id, report.CustomerId);
+        Assert.Equal(DateTime.Today, report.DateFrom);
+        Assert.Equal(DateTime.Today, report.DateTo);
     }
 
     [Fact]
@@ -1499,7 +1715,7 @@ public class WorkLogApplicationValidationTests
             : new Project(context.Customer.Id, "Project", paymentType, ProjectStatus.Active, null, null, null, null, paymentType == ProjectPaymentType.FixedPrice ? 10000m : null, "admin");
         context.NewStatus = new StatusConfig("new", "New", WorkItemStatusTypology.New, "New", 10, true, "admin");
         context.ClosedStatus = new StatusConfig("closed", "Closed", WorkItemStatusTypology.Closed, "Closed", 90, true, "admin");
-        context.WorkItem = new WorkItem("WL-1", context.Project.Id, "Task", "Task description", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        context.WorkItem = new WorkItem("WL-1", context.Project.Id, "Task", "Task description", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         context.Employees.Items.Add(context.Employee);
         context.Customers.Items.Add(context.Customer);
         context.Projects.Items.Add(context.Project);
@@ -1545,7 +1761,7 @@ public class WorkLogApplicationValidationTests
     {
         var customer = new Customer("Other", "other.test", "Other", "other@example.com", null, "admin");
         var project = new Project(customer.Id, "Other project", ProjectPaymentType.TimeAndMaterial, ProjectStatus.Active, null, 60m, 90m, 120m, null, "admin");
-        var workItem = new WorkItem("WL-X", project.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Id, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
+        var workItem = new WorkItem("WL-X", project.Id, "Other task", "Other", context.NewStatus.Key, WorkItemPriority.Normal, context.Employee.Email, "reporter@example.com", WorkItemOrigin.Manual, null, DateTime.Today, false, "admin");
         context.Customers.Items.Add(customer);
         context.Projects.Items.Add(project);
         context.WorkItems.Items.Add(workItem);

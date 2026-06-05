@@ -250,7 +250,6 @@ export default function SettingsPage() {
     const portalUserActive = formData.get("portalUserActive") === "true"
     const portalUserEmail = stringValue(formData.get("portalUserEmail"))
     const portalUserDisplayName = stringValue(formData.get("portalUserDisplayName"))
-    const portalUserCognitoSub = nullableText(formData.get("portalUserCognitoSub"))
     const existingPortalUser = editingCustomer ? primaryCustomerPortalUser : null
 
     setIsSaving(true)
@@ -263,7 +262,6 @@ export default function SettingsPage() {
         if (enablePortalUser) {
           const request = {
             email: portalUserEmail,
-            cognitoSub: portalUserCognitoSub,
             userType: "Customer" as const,
             role: "Customer" as const,
             employeeId: null,
@@ -281,7 +279,6 @@ export default function SettingsPage() {
           await updateWorkLogUser({
             id: existingPortalUser.id,
             email: existingPortalUser.email,
-            cognitoSub: existingPortalUser.cognitoSub,
             userType: "Customer",
             role: "Customer",
             employeeId: null,
@@ -321,7 +318,6 @@ export default function SettingsPage() {
     const enableLogin = formData.get("enableLogin") === "true"
     const accessRole = formData.get("accessRole") as Extract<WorkLogUserRole, "Admin" | "Employee">
     const accessActive = formData.get("accessActive") === "true"
-    const cognitoSub = nullableText(formData.get("cognitoSub"))
     const existingUser = editingEmployee ? employeeAccessUser : null
 
     setIsSaving(true)
@@ -334,7 +330,6 @@ export default function SettingsPage() {
         if (enableLogin) {
           const request = {
             email: savedEmployee.email,
-            cognitoSub,
             userType: "Employee" as const,
             role: accessRole,
             employeeId: savedEmployee.id,
@@ -352,7 +347,6 @@ export default function SettingsPage() {
           await updateWorkLogUser({
             id: existingUser.id,
             email: savedEmployee.email,
-            cognitoSub: existingUser.cognitoSub,
             userType: "Employee",
             role: existingUser.role === "Admin" ? "Admin" : "Employee",
             employeeId: savedEmployee.id,
@@ -883,15 +877,6 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="portalUserCognitoSub">CognitoSub (advanced)</Label>
-                  <Input
-                    id="portalUserCognitoSub"
-                    name="portalUserCognitoSub"
-                    defaultValue={primaryCustomerPortalUser?.cognitoSub || ""}
-                    placeholder="Optional Cognito subject"
-                  />
-                </div>
-                <div className="grid gap-2">
                   <Label htmlFor="portalUserActive">Portal user status</Label>
                   <Select name="portalUserActive" defaultValue={primaryCustomerPortalUser?.active !== false ? "true" : "false"}>
                     <SelectTrigger>
@@ -1021,15 +1006,6 @@ export default function SettingsPage() {
                       <SelectItem value="Admin">Admin</SelectItem>
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="cognitoSub">CognitoSub (advanced)</Label>
-                  <Input
-                    id="cognitoSub"
-                    name="cognitoSub"
-                    defaultValue={employeeAccessUser?.cognitoSub || ""}
-                    placeholder="Optional Cognito subject"
-                  />
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="accessActive">WorkLogUser status</Label>

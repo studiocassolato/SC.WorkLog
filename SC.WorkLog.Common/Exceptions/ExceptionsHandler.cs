@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -37,7 +36,7 @@ namespace SC.WorkLog.Common.Exceptions
                 // When the setting is not enabled, request exceptions can be hidden while debugging.
                 System.Diagnostics.Debug.WriteLine(ex);
 
-                _logger.LogError(ex, "\nError executing api {Path}]\n[REQUEST] {Request}\n[ERROR MESSAGE] {ErrorMessage}", context.Request.Path.Value, GetRequestAsString(context.Request), ex.Message);
+                _logger.LogError(ex, "\nError executing api {Path}\n[ERROR MESSAGE] {ErrorMessage}", context.Request.Path.Value, ex.Message);
                 context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
 
                 var result = JsonSerializer.Serialize(new ErrorResponse(new List<string> { ex.Message }));
@@ -49,7 +48,7 @@ namespace SC.WorkLog.Common.Exceptions
                 // When the setting is not enabled, request exceptions can be hidden while debugging.
                 System.Diagnostics.Debug.WriteLine(ex);
 
-                _logger.LogError(ex, "\nError executing api {Path}\n[REQUEST] {Request}\n[ERROR MESSAGE] Internal server error", context.Request.Path.Value, GetRequestAsString(context.Request));
+                _logger.LogError(ex, "\nError executing api {Path}\n[ERROR MESSAGE] Internal server error", context.Request.Path.Value);
                 context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
 
                 var result = JsonSerializer.Serialize(new ErrorResponse(new List<string>()));
@@ -57,23 +56,5 @@ namespace SC.WorkLog.Common.Exceptions
             }
         }
 
-        private string GetRequestAsString(HttpRequest request)
-        {
-            try
-            {
-                if (request.Body.CanSeek)
-                {
-                    request.Body.Seek(0, SeekOrigin.Begin);
-                    using (var reader = new StreamReader(request.Body))
-                        return reader.ReadToEnd();
-                }
-
-                return request.QueryString.HasValue ? request.QueryString.Value : string.Empty;
-            }
-            catch (Exception)
-            {
-                return string.Empty;
-            }
-        }
     }
 }

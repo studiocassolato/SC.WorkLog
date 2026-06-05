@@ -133,11 +133,12 @@ export default function ProjectsPage() {
     setLoadError(null)
 
     try {
-      const hasFilters = searchQuery.trim() || statusTab !== "all" || paymentFilter !== "all"
+      const hasPaymentFilter = isAdmin && paymentFilter !== "all"
+      const hasFilters = searchQuery.trim() || statusTab !== "all" || hasPaymentFilter
       const params: ProjectSearchParams = {
         search: searchQuery.trim() || undefined,
         status: statusTab === "all" ? undefined : statusTab,
-        paymentType: paymentFilter === "all" ? undefined : paymentFilter,
+        paymentType: hasPaymentFilter ? paymentFilter : undefined,
       }
       const response = hasFilters ? await searchProjects(params) : await getProjects()
       setProjects(response)
@@ -147,7 +148,7 @@ export default function ProjectsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [paymentFilter, searchQuery, statusTab])
+  }, [isAdmin, paymentFilter, searchQuery, statusTab])
 
   useEffect(() => {
     void loadProjects()
@@ -244,18 +245,20 @@ export default function ProjectsPage() {
               className="pl-10"
             />
           </div>
-          <Select value={paymentFilter} onValueChange={(value) => setPaymentFilter(value as PaymentFilter)}>
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <SelectValue placeholder="Payment Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Types</SelectItem>
-              <SelectItem value="TimeAndMaterial">Time & Material</SelectItem>
-              <SelectItem value="FixedPrice">Fixed Price</SelectItem>
-              <SelectItem value="AnnualRetainer">Annual Retainer</SelectItem>
-              <SelectItem value="Internal">Internal</SelectItem>
-            </SelectContent>
-          </Select>
+          {isAdmin && (
+            <Select value={paymentFilter} onValueChange={(value) => setPaymentFilter(value as PaymentFilter)}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="Payment Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                <SelectItem value="TimeAndMaterial">Time & Material</SelectItem>
+                <SelectItem value="FixedPrice">Fixed Price</SelectItem>
+                <SelectItem value="AnnualRetainer">Annual Retainer</SelectItem>
+                <SelectItem value="Internal">Internal</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
         </div>
       </div>
 
@@ -285,7 +288,7 @@ export default function ProjectsPage() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="w-[280px]">Project</TableHead>
                 <TableHead>Customer</TableHead>
-                <TableHead>Type</TableHead>
+                {isAdmin && <TableHead>Type</TableHead>}
                 <TableHead>Status</TableHead>
                 <TableHead className="text-center">Work Items</TableHead>
                 <TableHead className="text-center">Hours</TableHead>
@@ -294,7 +297,7 @@ export default function ProjectsPage() {
             </TableHeader>
             <TableBody>
               {projects.map((project) => {
-                const paymentBadge = getPaymentBadge(project.paymentType)
+                const paymentBadge = project.paymentType ? getPaymentBadge(project.paymentType) : null
                 return (
                   <TableRow
                     key={project.id}
@@ -310,6 +313,11 @@ export default function ProjectsPage() {
                           <p className="font-medium truncate group-hover:text-primary transition-colors">
                             {project.name}
                           </p>
+                          {project.isDefault && (
+                            <Badge variant="secondary" className="mt-1 w-fit text-[10px]">
+                              Default
+                            </Badge>
+                          )}
                           {project.openWorkItemCount > 0 && (
                             <p className="text-xs text-amber-600">{project.openWorkItemCount} open</p>
                           )}
@@ -319,11 +327,15 @@ export default function ProjectsPage() {
                     <TableCell>
                       <span className="text-muted-foreground">{project.customerName ?? "Unknown"}</span>
                     </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={cn("text-xs font-medium", paymentBadge.className)} title={paymentTypeLabel(project.paymentType)}>
-                        {paymentBadge.label}
-                      </Badge>
-                    </TableCell>
+                    {isAdmin && (
+                      <TableCell>
+                        {paymentBadge && project.paymentType && (
+                          <Badge variant="outline" className={cn("text-xs font-medium", paymentBadge.className)} title={paymentTypeLabel(project.paymentType)}>
+                            {paymentBadge.label}
+                          </Badge>
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell>
                       <Badge variant="outline" className={cn("text-xs font-medium", getStatusColor(project.status))}>
                         <CircleDot className="mr-1 h-3 w-3" />

@@ -23,6 +23,16 @@
     <Content Include="appsettings*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="..\SC.WorkLog.Infrastructure\Data\*.csv" Link="Data\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
+
+  <Target Name="CopyInfrastructureDataFiles" AfterTargets="Build">
+    <ItemGroup>
+      <InfrastructureDataFiles Include="..\SC.WorkLog.Infrastructure\Data\*.csv" />
+    </ItemGroup>
+    <Copy SourceFiles="@(InfrastructureDataFiles)" DestinationFolder="$(OutDir)Data" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

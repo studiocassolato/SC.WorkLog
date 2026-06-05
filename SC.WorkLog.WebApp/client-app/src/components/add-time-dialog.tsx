@@ -106,6 +106,7 @@ export function AddTimeDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const currentEmployeeId = currentUser?.employeeId ?? ""
+  const currentUserEmail = currentUser?.email ?? ""
   const employeeOptions = isAdmin ? employees : []
   const selectedEmployeeId = isAdmin ? employeeId : currentEmployeeId
   const selectedProject = projects.find((project) => project.id === projectId)
@@ -179,7 +180,7 @@ export function AddTimeDialog({
           search: search.trim() || undefined,
           customerId: customerId === "all" ? undefined : customerId,
           projectId: projectId === "all" ? undefined : projectId,
-          assigneeId: assignedToMe && currentEmployeeId ? currentEmployeeId : undefined,
+          assigneeId: assignedToMe && currentUserEmail ? currentUserEmail : undefined,
           includeClosed,
         }
         const response = await getWorkItems(filter)

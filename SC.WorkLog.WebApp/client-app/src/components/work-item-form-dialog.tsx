@@ -109,6 +109,7 @@ export function WorkItemFormDialog({
   const [origin, setOrigin] = useState<WorkItemOrigin>("Manual")
   const [priority, setPriority] = useState<WorkItemPriority>("Normal")
   const [projectId, setProjectId] = useState(defaultProjectId ?? "")
+  const [reporter, setReporter] = useState("")
   const [statusKey, setStatusKey] = useState(backendDefaultStatusValue)
   const [title, setTitle] = useState("")
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -128,6 +129,7 @@ export function WorkItemFormDialog({
     setOrigin(workItem?.origin ?? "Manual")
     setPriority(workItem?.priority ?? "Normal")
     setProjectId(workItem?.projectId ?? defaultProjectId ?? "")
+    setReporter(workItem?.reporter ?? "")
     setStatusKey(workItem?.statusKey ?? backendDefaultStatusValue)
     setTitle(workItem?.title ?? "")
   }, [defaultProjectId, open, workItem])
@@ -159,6 +161,7 @@ export function WorkItemFormDialog({
       statusKey: statusKey === backendDefaultStatusValue ? null : statusKey,
       priority,
       assigneeId: assigneeId === unassignedValue ? null : assigneeId,
+      reporter: reporter.trim() || null,
       origin,
       externalReference: externalReference.trim() || null,
       openingDate,
@@ -291,7 +294,7 @@ export function WorkItemFormDialog({
                 <SelectContent>
                   <SelectItem value={unassignedValue}>Unassigned</SelectItem>
                   {employees.map((employee) => (
-                    <SelectItem key={employee.id} value={employee.id}>
+                    <SelectItem key={employee.id} value={employee.email}>
                       {employee.firstName} {employee.lastName}
                     </SelectItem>
                   ))}
@@ -314,6 +317,17 @@ export function WorkItemFormDialog({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="workItemReporter">Reporter email</Label>
+            <Input
+              id="workItemReporter"
+              type="email"
+              value={reporter}
+              onChange={(event) => setReporter(event.target.value)}
+              placeholder="Optional reporter email"
+            />
           </div>
 
           <div className="space-y-2">

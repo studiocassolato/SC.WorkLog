@@ -31,7 +31,7 @@ internal static class WorkLogCalculatorTestFactory
     public static WorkItem WorkItem(Project project)
     {
         var status = new StatusConfig("new", "New", WorkItemStatusTypology.New, "New", 10, true, CurrentUser);
-        return new WorkItem("WI-1", project.Id, "Work item", "Description", status.Key, WorkItemPriority.Normal, null, WorkItemOrigin.Manual, null, new DateTime(2026, 1, 1), false, CurrentUser);
+        return new WorkItem("WI-1", project.Id, "Work item", "Description", status.Key, WorkItemPriority.Normal, null, null, WorkItemOrigin.Manual, null, new DateTime(2026, 1, 1), false, CurrentUser);
     }
 
     public static TimeEntry TimeEntry(Employee employee, WorkItem workItem, DateTime date, decimal time, decimal approvedTime, decimal defaultRate = 50m, decimal projectRate = 100m)

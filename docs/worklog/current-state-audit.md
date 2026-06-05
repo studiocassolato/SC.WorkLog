@@ -2,12 +2,12 @@
 
 ## 1. Summary
 
-This audit describes the WorkLog implementation after the first API integration slices: authentication/current user, Settings and the Project area. Remaining business pages still use mock data.
+This audit describes the WorkLog implementation after the current API integration slices through Customer Reports. Dashboard remains the main mock-only business page.
 
 Overall state:
 
 - Backend Domain, Application, MongoDB persistence, API controllers and Cognito current-user resolution are implemented at an initial but coherent level.
-- Frontend authentication is integrated with Cognito and `/api/Auth/Me`; Settings Statuses/Employees/Customers plus Projects list/base detail/create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, Project Detail Work Items, Project Detail Time Entries, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals and Time Completeness are API-backed, while Reports and Dashboard still use mock data.
+- Frontend authentication is integrated with Cognito and `/api/Auth/Me`; Settings Statuses/Employees/Customers plus Projects list/base detail/create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, Project Detail Work Items, Project Detail Time Entries, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals, Time Completeness and Customer Reports are API-backed, while Dashboard still uses mock data.
 - `WorkLogUser` is the authoritative application authorization model. `Employee` is operational/HR data only.
 - Customer users remain intentionally blocked during backend current-user resolution.
 - The main remaining risks are API pagination/filter breadth, incomplete frontend API integration, pending customer visibility rules, and a large frontend bundle.
@@ -27,7 +27,11 @@ Small stabilization fixes applied during this audit:
 - My Day now reads backend TimeEntries, leave requests and daily completeness for the logged-in employee, creates leave/permission requests through `LeaveRequest/CreateLeaveRequest`, and refreshes after Add Time or leave changes.
 - The Approvals page now lists backend leave and overtime requests and lets Admin users approve/reject them through `LeaveRequest/ApproveLeaveRequest`, `LeaveRequest/RejectLeaveRequest`, `OvertimeRequest/ApproveOvertimeRequest` and `OvertimeRequest/RejectOvertimeRequest`.
 - The Time Completeness page now reads `TimeCompleteness/GetTimeCompleteness` and renders backend-owned expected, worked, approved leave, missing and overtime status values without frontend recalculation.
-- TimeEntry and Project detail read models now hide ApprovedTime, admin notes, employee level snapshots, rate snapshots, calculated values and project billing fields from non-admin responses at backend mapping level.
+- Customer Reports now read `Report/GetCustomerReport`; Admin users select a customer, date range and optional project filter, and the backend report is the source of truth for totals, approved hours and worked value.
+- TimeEntry, LeaveRequest and Project read models now hide ApprovedTime, admin notes, employee level snapshots, rate snapshots, calculated values, project payment type and project billing fields from non-admin responses at backend mapping level.
+- Employee users can read all projects, project milestones and customers; project/customer writes, project payment type and project economics remain Admin-only.
+- Projects include an `IsDefault` flag; `ProjectService` enforces at most one default project per customer on create/update.
+- A local ConsoleTester Jira/Tempo import foundation exists for SUPPORT: read-only Jira/Tempo clients, domain import metadata, sync-state tracking and application tests with fake clients. It has no frontend UI, WebApp endpoints or scheduler.
 - `StatusConfigService.UpdateStatusConfig` validates the final updated status set, so deactivating or retagging statuses cannot bypass active New/closed invariants.
 - `WorkLogContext.currentUser` now aligns mock-only pages to backend `currentUser.employeeId` when possible.
 - Documentation was updated for ID-token usage, `SCWorkLog` local DB, implemented controllers/auth, and frontend mock boundary.
@@ -46,6 +50,7 @@ Implemented backend areas:
 - AdminOnly policy based on `WorkLogUserType.Employee` plus `WorkLogUserRole.Admin`.
 - ConsoleTester seed for the local admin user in MongoDB database `SCWorkLog`.
 - ConsoleTester exposes an explicit `EnsureDefaultStatuses` command for local/development initialization of default Work Item statuses only.
+- ConsoleTester exposes local read-only Jira/Tempo import commands for SUPPORT issues and worklogs.
 
 Implemented frontend areas:
 
@@ -55,16 +60,16 @@ Implemented frontend areas:
 - Protected route gating that requires Cognito authentication and successful backend current-user resolution.
 - Top bar and navigation visibility based on backend current user.
 - Mock-only page identity alignment from backend `currentUser.employeeId` when a matching mock employee exists.
-- Projects list, base Project Detail, Project create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, Project Detail Work Items, Project Detail Time Entries, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals and Time Completeness now use backend APIs.
+- Projects list and base Project Detail are API-backed for all employee users; Project create/update, Project Detail Economics, Project Payments, Project Contract Periods and Project Milestone writes are Admin-only. Project Detail Milestones, Project Detail Work Items, Project Detail Time Entries, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals, Time Completeness and Customer Reports now use backend APIs.
 - Settings currently includes Statuses, Customers and Employees. Statuses and Employees/Customers are API-backed; Employees/Customers manage related `WorkLogUser` records behind the scenes.
 - Demo role switcher retained as demo-only UI preview.
 
 Not implemented by design:
 
-- API integration for Reports and Dashboard.
+- API integration for Dashboard.
 - Customer portal and customer-specific visibility.
-- Replacing mock data.
-- Export/report delivery.
+- Replacing remaining Dashboard and comment mock data.
+- Official export/report delivery. Customer Reports currently supports CSV export from already-loaded backend report rows only; PDF generation is not implemented.
 - Fine-grained permissions beyond `AdminOnly` and service guards.
 
 ## 3. Build/Test/Lint Results
@@ -79,7 +84,7 @@ Commands requested for validation:
 Current validation result:
 
 - `dotnet build SC.WorkLog.sln`: passed.
-- `dotnet test SC.WorkLog.sln --no-build`: passed, 169 tests.
+- `dotnet test SC.WorkLog.sln --no-build`: passed, 186 tests.
 - `npm run build`: passed.
 - `npm run lint`: passed.
 
@@ -98,7 +103,7 @@ Current flow:
 4. ASP.NET Core JWT bearer validates issuer, signature and lifetime.
 5. `OnTokenValidated` validates configured client id using `aud`/`client_id`.
 6. `OnTokenValidated` now validates `token_use = id`.
-7. Backend resolves `WorkLogUser` by Cognito `sub`, with email fallback.
+7. Backend resolves `WorkLogUser` by Cognito email claim.
 8. Backend rejects missing/inactive WorkLog users and customer users.
 9. Backend enriches claims with WorkLog user id, user type, role, employee id and customer id.
 10. `/api/Auth/Me` returns `CurrentUserResponse` with server-side current-user context.
@@ -177,13 +182,14 @@ Endpoints intentionally absent:
 
 - `GetComments`
 - Customer portal endpoints
+- Jira/Tempo import endpoints; import is ConsoleTester-only in this phase.
 
 ## 6. Frontend Status
 
 Current frontend state:
 
 - Auth/current-user shell is API-backed.
-- Business pages outside Settings, Projects, Work Items, Time Entries, My Day, Approvals and Time Completeness are still mock-only or pending.
+- Business pages outside Settings, Projects, Work Items, Time Entries, My Day, Approvals, Time Completeness and Customer Reports are still mock-only or pending.
 - `apiClient` centralizes Authorization header injection.
 - No raw `axios` or `fetch` business API calls were found outside `apiClient`/auth usage.
 - `ProtectedRoute` blocks the app shell if backend current-user resolution fails.
@@ -195,7 +201,7 @@ Navigation status:
 - Admin sees admin areas and employee-accessible areas.
 - Employee sees employee-accessible areas.
 - Customer users are blocked before shell rendering.
-- Settings exposes Customers and Employees backed by API data. Projects list/detail/create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, Project Detail Work Items, Project Detail Time Entries, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals and Time Completeness are also backend-backed. A separate WorkLog Users page is intentionally not present; `WorkLogUser` is managed behind those screens.
+- Settings exposes Customers and Employees backed by API data. Projects list/detail/create/update, Project Detail Economics, Project Payments, Project Contract Periods, Project Milestones, Project Detail Work Items, Project Detail Time Entries, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals, Time Completeness and Customer Reports are also backend-backed. A separate WorkLog Users page is intentionally not present; `WorkLogUser` is managed behind those screens.
 
 Role-switcher status:
 
@@ -229,7 +235,7 @@ Settings API integration status:
 - These multi-step saves are not transactional; the UI reports when profile save succeeds but access/user configuration fails.
 - Settings uses `WorkLogUser/GetUsers` with server-side filters for employee/customer linkage. Pagination remains pending.
 - Expected daily hours remain stored per Employee. Leave/permission/overtime approvals remain admin workflow concerns, not company-level settings.
-- Projects list uses `Project/GetProjects` or `Project/SearchProjects`; Project Detail uses `Project/GetProject`; Admin project create/update uses `Project/CreateProject` and `Project/UpdateProject`; Project Detail Economics uses `Project/GetProjectEconomics`; Project Payments uses `Project/GetProjectPayments`, `Project/CreateProjectPayment`, `Project/UpdateProjectPayment` and `Project/DeleteProjectPayment` for Time & material projects; Project Contract Periods uses `Project/GetProjectContractPeriods`, `Project/CreateProjectContractPeriod`, `Project/UpdateProjectContractPeriod` and `Project/DeleteProjectContractPeriod` for Annual retainer projects; Project Milestones use `Project/CreateMilestone`, `Project/UpdateMilestone` and `Project/DeleteMilestone`; Project Detail Work Items and global Work Items use `WorkItem/GetWorkItems`; Project Detail Time Entries and global Time Entries use `TimeEntry/GetTimeEntries`; Add Time uses `TimeEntry/CreateTimeEntry`; TimeEntry edit uses `TimeEntry/UpdateTimeEntry`; Admin ApprovedTime uses `TimeEntry/UpdateApprovedTime`; My Day uses `TimeEntry/GetTimeEntries`, `LeaveRequest/GetLeaveRequests`, `LeaveRequest/CreateLeaveRequest`, `TimeCompleteness/GetTimeCompleteness` and assigned Work Items from `WorkItem/GetWorkItems`; Approvals uses `LeaveRequest/GetLeaveRequests`, `LeaveRequest/ApproveLeaveRequest`, `LeaveRequest/RejectLeaveRequest`, `OvertimeRequest/GetOvertimeRequests`, `OvertimeRequest/GetOvertimeRequest`, `OvertimeRequest/ApproveOvertimeRequest` and `OvertimeRequest/RejectOvertimeRequest`; Time Completeness uses `TimeCompleteness/GetTimeCompleteness`; Work Item Detail uses `WorkItem/GetWorkItem`; Admin Work Item create/update/status-change uses `WorkItem/CreateWorkItem` and `WorkItem/UpdateWorkItem`. Global Work Items filters are backend-backed for search, project, customer, assignee, unassigned-only, status key, priority and include-closed. Global Time Entries filters are backend-backed for date, employee, customer, project and status. Work Item comments retrieval UI, origin filtering and Project Detail Add Work Item shortcut remain pending.
+- Projects list uses `Project/GetProjects` or `Project/SearchProjects`; Project Detail uses `Project/GetProject`; Admin project create/update uses `Project/CreateProject` and `Project/UpdateProject`; Project Detail Economics uses `Project/GetProjectEconomics`; Project Payments uses `Project/GetProjectPayments`, `Project/CreateProjectPayment`, `Project/UpdateProjectPayment` and `Project/DeleteProjectPayment` for Time & material projects; Project Contract Periods uses `Project/GetProjectContractPeriods`, `Project/CreateProjectContractPeriod`, `Project/UpdateProjectContractPeriod` and `Project/DeleteProjectContractPeriod` for Annual retainer projects; Project Milestones use `Project/CreateMilestone`, `Project/UpdateMilestone` and `Project/DeleteMilestone`; Project Detail Work Items and global Work Items use `WorkItem/GetWorkItems`; Project Detail Time Entries and global Time Entries use `TimeEntry/GetTimeEntries`; Add Time uses `TimeEntry/CreateTimeEntry`; TimeEntry edit uses `TimeEntry/UpdateTimeEntry`; Admin ApprovedTime uses `TimeEntry/UpdateApprovedTime`; My Day uses `TimeEntry/GetTimeEntries`, `LeaveRequest/GetLeaveRequests`, `LeaveRequest/CreateLeaveRequest`, `TimeCompleteness/GetTimeCompleteness` and assigned Work Items from `WorkItem/GetWorkItems`; Approvals uses `LeaveRequest/GetLeaveRequests`, `LeaveRequest/ApproveLeaveRequest`, `LeaveRequest/RejectLeaveRequest`, `OvertimeRequest/GetOvertimeRequests`, `OvertimeRequest/GetOvertimeRequest`, `OvertimeRequest/ApproveOvertimeRequest` and `OvertimeRequest/RejectOvertimeRequest`; Time Completeness uses `TimeCompleteness/GetTimeCompleteness`; Customer Reports uses `Customer/GetCustomers`, `Project/SearchProjects` and `Report/GetCustomerReport`; Work Item Detail uses `WorkItem/GetWorkItem`; Admin Work Item create/update/status-change uses `WorkItem/CreateWorkItem` and `WorkItem/UpdateWorkItem`. Global Work Items filters are backend-backed for search, project, customer, assignee, unassigned-only, status key, priority and include-closed. Global Time Entries filters are backend-backed for date, employee, customer, project and status. Work Item comments retrieval UI, origin filtering and Project Detail Add Work Item shortcut remain pending.
 
 ## 7. MongoDB/Persistence Status
 
@@ -245,7 +251,7 @@ Persistence findings:
 - Index definitions exist in `WorkLogDatabaseIndexes`.
 - `TimeEntry` indexes include project-scoped date and employee/date compounds for report and economics queries.
 - `WorkLogUser` indexes are configured and documented.
-- `CognitoSub` sparse unique index limitation is documented.
+- WorkLog current-user resolution uses Cognito email claims mapped to `WorkLogUser.Email`.
 - No SQL/EF/migration concepts were introduced.
 
 Operational gap:
@@ -273,7 +279,7 @@ Findings to address later:
 - Current-user response uses `CurrentUserResponse`; keep it as the shared contract when adding future profile fields.
 - Fine-grained permissions beyond `AdminOnly` are not implemented.
 - Permission failures currently often surface as `ArgumentException` and therefore HTTP 400 through `ExceptionsHandler`; authorization failures should eventually map to 403.
-- `ExceptionsHandler` logs request bodies where seekable. This can include notes or other PII and should be reviewed before production.
+- `ExceptionsHandler` no longer logs request bodies; it logs path and error summary only.
 
 ## 9. Performance Findings
 
@@ -291,7 +297,7 @@ Potential issues:
 - `ProjectService.GetProjectsAsync` loads all projects; search/filter endpoint exists and should be preferred for large data.
 - `TimeCompletenessService` loads all active employees, all time entries, approved leaves and overtime requests in the date range, then filters some employee scope in memory.
 - JWT validation resolves WorkLog user/employee from MongoDB on every authenticated request; a short-lived cache could reduce DB load.
-- Dashboard and report pages remain mock-only; real API integration must avoid broad unfiltered report calls.
+- Dashboard remains mock-only. Customer Reports is API-backed through required customer/date filters; broader report pagination/export delivery remains future work.
 - Frontend bundle is large; route-level lazy loading and chart splitting should be future work.
 
 Domain/application behavior to review before production:
@@ -309,7 +315,7 @@ Fixed during this audit:
 - `application-layer.md` no longer says persistence/API controllers/auth are not implemented.
 - `persistence-mongodb.md` now documents standard Guid serialization and local DB `SCWorkLog`.
 - `persistence-mongodb.md` no longer lists API controllers/frontend auth/Cognito as pending.
-- `frontend-mock-model.md` now states auth/current-user shell is backend-backed while business pages remain mock-only.
+- `frontend-mock-model.md` now states auth/current-user shell is backend-backed while Dashboard and deferred comment/customer-portal surfaces remain mock/pending.
 
 ## 11. Issues Found And Fixed
 
@@ -328,7 +334,7 @@ Fixed:
 Validation after fixes:
 
 - `dotnet build SC.WorkLog.sln`: passed.
-- `dotnet test SC.WorkLog.sln --no-build`: passed, 169 tests.
+- `dotnet test SC.WorkLog.sln --no-build`: passed, 186 tests.
 - `npm run build`: passed with the existing Vite large-bundle warning.
 - `npm run lint`: passed.
 
@@ -336,7 +342,7 @@ Validation after fixes:
 
 Pending by design:
 
-- Replace remaining frontend mock data with API-backed pages, excluding Settings, Projects list/base detail/create/update, Project Detail Economics, Payments, Contract Periods, Milestones, Project Detail Work Items, Project Detail Time Entries, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals and Time Completeness already connected.
+- Replace remaining frontend mock data with API-backed pages, excluding Settings, Projects list/base detail/create/update, Project Detail Economics, Payments, Contract Periods, Milestones, Project Detail Work Items, Project Detail Time Entries, global Work Items, Work Item Detail create/update/status-change, Add Time, global Time Entries, My Day, Approvals, Time Completeness and Customer Reports already connected.
 - Decide whether additional admin pages are needed beyond Settings Statuses/Customers/Employees. A separate WorkLog Users page is intentionally deferred.
 - Implement customer portal and customer-specific authorization/visibility.
 - Implement project/customer visibility rules backed by persisted permissions.

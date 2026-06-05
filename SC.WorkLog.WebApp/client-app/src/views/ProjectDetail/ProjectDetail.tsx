@@ -1149,9 +1149,12 @@ export default function ProjectDetailPage() {
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2 mb-2">
               {getStatusBadge(project.status)}
-              <Badge variant="secondary" className={cn("font-medium", getPaymentBadgeClass(project.paymentType))}>
-                {paymentTypeLabel(project.paymentType)}
-              </Badge>
+              {project.isDefault && <Badge variant="secondary">Default project</Badge>}
+              {isAdmin && project.paymentType && (
+                <Badge variant="secondary" className={cn("font-medium", getPaymentBadgeClass(project.paymentType))}>
+                  {paymentTypeLabel(project.paymentType)}
+                </Badge>
+              )}
             </div>
             <h1 className="text-xl md:text-2xl font-semibold text-foreground truncate">{project.name}</h1>
             <p className="text-muted-foreground">{project.customer?.companyName ?? "Unknown customer"}</p>
@@ -1244,13 +1247,19 @@ export default function ProjectDetailPage() {
                   <span className="text-muted-foreground">Email</span>
                   <span className="text-primary text-right">{project.customer?.contactEmail ?? "N/A"}</span>
                 </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-muted-foreground">Payment Type</span>
-                  <span className="font-medium text-right">{paymentTypeLabel(project.paymentType)}</span>
-                </div>
+                {isAdmin && project.paymentType && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Payment Type</span>
+                    <span className="font-medium text-right">{paymentTypeLabel(project.paymentType)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between gap-4">
                   <span className="text-muted-foreground">Status</span>
                   {getStatusBadge(project.status)}
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">Default Project</span>
+                  <span className="font-medium text-right">{project.isDefault ? "Yes" : "No"}</span>
                 </div>
                 {project.notes && (
                   <div className="pt-2 border-t">
@@ -1708,9 +1717,11 @@ export default function ProjectDetailPage() {
                     <CardTitle className="text-base">Project Economics</CardTitle>
                     <CardDescription>Admin-only economics loaded from Project/GetProjectEconomics.</CardDescription>
                   </div>
-                  <Badge variant="secondary" className={cn("w-fit font-medium", getPaymentBadgeClass(project.paymentType))}>
-                    {paymentTypeLabel(project.paymentType)}
-                  </Badge>
+                  {project.paymentType && (
+                    <Badge variant="secondary" className={cn("w-fit font-medium", getPaymentBadgeClass(project.paymentType))}>
+                      {paymentTypeLabel(project.paymentType)}
+                    </Badge>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">

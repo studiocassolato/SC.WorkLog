@@ -151,6 +151,9 @@ namespace SC.WorkLog.Application.Services
         public async Task<CustomerReportDto> GetCustomerReportAsync(CustomerReportFilter filter, WorkLogUserContext userContext)
         {
             WorkLogApplicationValidation.RequireAdmin(userContext, nameof(GetCustomerReportAsync));
+            WorkLogApplicationValidation.Required(filter.CustomerId.GetValueOrDefault(), nameof(filter.CustomerId));
+            WorkLogApplicationValidation.Required(filter.DateFrom, nameof(filter.DateFrom));
+            WorkLogApplicationValidation.Required(filter.DateTo, nameof(filter.DateTo));
             WorkLogApplicationValidation.ValidDateRange(filter.DateFrom, filter.DateTo, nameof(filter.DateTo));
             var projects = await LoadCustomerReportProjectsAsync(filter);
             if (!projects.Any())
@@ -184,12 +187,9 @@ namespace SC.WorkLog.Application.Services
         private async Task<List<Project>> LoadCustomerReportProjectsAsync(CustomerReportFilter filter)
         {
             if (filter.ProjectId.HasValue)
-                return await _projects.Get(x => x.Id == filter.ProjectId.Value && x.PaymentType != ProjectPaymentType.Internal);
+                return await _projects.Get(x => x.Id == filter.ProjectId.Value && x.CustomerId == filter.CustomerId.Value && x.PaymentType != ProjectPaymentType.Internal);
 
-            if (filter.CustomerId.HasValue)
-                return await _projects.Get(x => x.CustomerId == filter.CustomerId.Value && x.PaymentType != ProjectPaymentType.Internal);
-
-            return await _projects.Get(x => x.PaymentType != ProjectPaymentType.Internal);
+            return await _projects.Get(x => x.CustomerId == filter.CustomerId.Value && x.PaymentType != ProjectPaymentType.Internal);
         }
 
         private static CustomerReportDto EmptyCustomerReport(CustomerReportFilter filter)

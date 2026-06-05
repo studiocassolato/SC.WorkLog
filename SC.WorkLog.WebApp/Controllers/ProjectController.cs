@@ -33,7 +33,7 @@ namespace SC.WorkLog.WebApp.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> SearchProjects([FromQuery] string search, [FromQuery] Guid? customerId, [FromQuery] ProjectStatus? status, [FromQuery] ProjectPaymentType? paymentType)
+        public async Task<IActionResult> SearchProjects([FromQuery] string search = "", [FromQuery] Guid? customerId = null, [FromQuery] ProjectStatus? status = null, [FromQuery] ProjectPaymentType? paymentType = null)
         {
             var response = await _projectService.SearchProjectsAsync(search, customerId, status, paymentType, UserContext());
             return Ok(response);

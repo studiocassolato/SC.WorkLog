@@ -53,10 +53,10 @@ public class ProjectStatusTypologyTests
         context.Customers.Items.Add(context.Customer);
         context.Projects.Items.Add(context.Project);
         context.StatusConfigs.Items.AddRange(new[] { newStatus, codeReviewStatus, waitingCustomerStatus, happyCustomerStatus });
-        context.WorkItems.Items.Add(new WorkItem("WL-1", context.Project.Id, "New task", "Task", newStatus.Key, WorkItemPriority.Normal, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin"));
-        context.WorkItems.Items.Add(new WorkItem("WL-2", context.Project.Id, "Review task", "Task", codeReviewStatus.Key, WorkItemPriority.Normal, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin"));
-        context.WorkItems.Items.Add(new WorkItem("WL-3", context.Project.Id, "Customer task", "Task", waitingCustomerStatus.Key, WorkItemPriority.Normal, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin"));
-        context.WorkItems.Items.Add(new WorkItem("WL-4", context.Project.Id, "Archived task", "Task", happyCustomerStatus.Key, WorkItemPriority.Normal, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin"));
+        context.WorkItems.Items.Add(new WorkItem("WL-1", context.Project.Id, "New task", "Task", newStatus.Key, WorkItemPriority.Normal, null, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin"));
+        context.WorkItems.Items.Add(new WorkItem("WL-2", context.Project.Id, "Review task", "Task", codeReviewStatus.Key, WorkItemPriority.Normal, null, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin"));
+        context.WorkItems.Items.Add(new WorkItem("WL-3", context.Project.Id, "Customer task", "Task", waitingCustomerStatus.Key, WorkItemPriority.Normal, null, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin"));
+        context.WorkItems.Items.Add(new WorkItem("WL-4", context.Project.Id, "Archived task", "Task", happyCustomerStatus.Key, WorkItemPriority.Normal, null, null, WorkItemOrigin.Manual, null, DateTime.Today, false, "admin"));
         return context;
     }
 

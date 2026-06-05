@@ -77,7 +77,6 @@ builder.Services
                 }
 
                 var validatedPrincipal = principal;
-                var cognitoSub = validatedPrincipal.FindFirstValue(ClaimTypes.NameIdentifier) ?? validatedPrincipal.FindFirstValue("sub");
                 var email = validatedPrincipal.FindFirstValue(ClaimTypes.Email) ?? validatedPrincipal.FindFirstValue("email");
                 var tokenUse = validatedPrincipal.FindFirstValue("token_use");
                 if (!string.Equals(tokenUse, "id", StringComparison.Ordinal))
@@ -103,7 +102,7 @@ builder.Services
                 WorkLogUser workLogUser;
                 try
                 {
-                    workLogUser = await userService.ResolveAuthenticatedUser(cognitoSub, email);
+                    workLogUser = await userService.ResolveAuthenticatedUser(email);
                 }
                 catch (UnauthorizedAccessException ex)
                 {

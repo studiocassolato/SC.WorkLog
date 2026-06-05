@@ -42,7 +42,7 @@ export function WorkItemDetailSheet({
 
   const project = projects.find((p) => p.id === workItem.projectId)
   const customer = project ? customers.find((c) => c.id === project.customerId) : null
-  const assignee = workItem.assigneeId ? employees.find((e) => e.id === workItem.assigneeId) : null
+  const assignee = workItem.assigneeId ? employees.find((e) => e.email.toLowerCase() === workItem.assigneeId?.toLowerCase()) : null
 
   const itemTimeEntries = timeEntries.filter((e) => e.workItemId === workItemId)
   const totalTime = itemTimeEntries.reduce((sum, e) => sum + e.time, 0)
@@ -116,6 +116,14 @@ export function WorkItemDetailSheet({
                 ) : (
                   <p className="text-sm text-amber-600">Unassigned</p>
                 )}
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <User className="h-4 w-4 mt-0.5 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">Reporter</p>
+                <p className="text-sm font-medium">{workItem.reporter || '-'}</p>
               </div>
             </div>
 

@@ -56,12 +56,11 @@ Customer portal access remains disabled. Customer users can be created and maint
 Backend current-user resolution:
 
 1. Validate Cognito JWT.
-2. Read Cognito `sub` and email claims.
-3. Resolve `WorkLogUser` by `CognitoSub`.
-4. Fallback to `WorkLogUser.Email`.
-5. Reject missing or inactive users.
-6. Reject customer users because the customer portal is not enabled yet.
-7. For employee users, require a linked active `Employee`.
+2. Read the Cognito email claim.
+3. Resolve `WorkLogUser` by `Email`.
+4. Reject missing or inactive users.
+5. Reject customer users because the customer portal is not enabled yet.
+6. For employee users, require a linked active `Employee`.
 
 `/api/Auth/Me` returns the Application DTO `CurrentUserResponse`. The frontend current-user type is aligned to that response shape, but role/profile authority remains the backend `WorkLogUser`; frontend role switching is still demo-only.
 
@@ -75,7 +74,7 @@ Backend services are the authorization boundary. Frontend hiding is only a UX la
 - `TimeEntry/UpdateApprovedTime` is Admin-only and is the only ApprovedTime write path.
 - Non-admin TimeEntry DTO responses return null for ApprovedTime, AdminNote, employee level snapshot, employee default rate snapshot, project rate snapshot and calculated value.
 
-Project billing values, payments, contract periods, project economics, customer reports, overtime administration and settings remain Admin-only. Project detail read models also hide billing fields, approved-hour summaries and team member levels from non-admin responses.
+Project billing values, project payment type, payments, contract periods, project economics, customer reports, overtime administration and settings remain Admin-only. `Report/GetCustomerReport` is protected by the Admin-only controller policy and `ProjectReportService` also requires Admin before returning report totals, approved hours or worked value. Project read models expose the non-economic `IsDefault` project flag to Employee users, but hide billing fields, payment type, approved-hour summaries and team member levels from non-admin responses.
 
 ## Leave Request Authorization
 
@@ -100,6 +99,15 @@ Overtime approval and operational completeness review are Admin workflows:
 - `TimeCompleteness/GetTimeCompleteness` is authenticated because My Day consumes it, but `TimeCompletenessService` scopes non-admin users to `WorkLogUserContext.EmployeeId`.
 - The Time Completeness page is Admin-only in routing. My Day remains the employee-facing daily completeness view.
 - The backend service, not the frontend, owns expected hours, worked hours, approved leave, missing hours and overtime status.
+
+## Customer Report Authorization
+
+Customer Reports are Admin-only for now:
+
+- the `/customer-reports` route is an Admin route and the UI uses `useAuth().isAdmin`;
+- `Report/GetCustomerReport` is protected by the Admin-only policy;
+- `ProjectReportService.GetCustomerReportAsync` requires Admin, requires `CustomerId`, requires a valid date range and scopes projects/time entries to the selected customer;
+- Customer users remain blocked by current-user resolution and cannot access the report surface.
 
 ## Pending
 

@@ -120,6 +120,7 @@ export default function MyDayPage() {
   const [leaveSaveError, setLeaveSaveError] = useState<string | null>(null)
 
   const employeeId = currentUser?.employeeId ?? ""
+  const currentUserEmail = currentUser?.email ?? ""
   const dateStr = toApiDate(selectedDate)
   const isToday = dateStr === toApiDate(new Date())
 
@@ -141,7 +142,7 @@ export default function MyDayPage() {
         getTimeEntries({ employeeId, dateFrom: dateStr, dateTo: dateStr }),
         getTimeCompleteness({ employeeId, dateFrom: dateStr, dateTo: dateStr }),
         getLeaveRequests({ employeeId, dateFrom: dateStr, dateTo: dateStr }),
-        getWorkItems({ assigneeId: employeeId, includeClosed: false }),
+        getWorkItems({ assigneeId: currentUserEmail, includeClosed: false }),
       ])
 
       setTimeEntries(timeResponse)
@@ -157,7 +158,7 @@ export default function MyDayPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [dateStr, employeeId])
+  }, [currentUserEmail, dateStr, employeeId])
 
   useEffect(() => {
     void loadMyDay()

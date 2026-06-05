@@ -13,6 +13,7 @@ namespace SC.WorkLog.Domain.AggregateRoots
         public ProjectStatus Status { get; private set; }
         public string Notes { get; private set; }
         public bool Active { get; private set; }
+        public bool IsDefault { get; private set; }
         public decimal? JuniorRate { get; private set; }
         public decimal? MidRate { get; private set; }
         public decimal? SeniorRate { get; private set; }
@@ -22,7 +23,7 @@ namespace SC.WorkLog.Domain.AggregateRoots
         {
         }
 
-        public Project(Guid customerId, string name, ProjectPaymentType paymentType, ProjectStatus status, string notes, decimal? juniorRate, decimal? midRate, decimal? seniorRate, decimal? fixedAmount, string currentUser)
+        public Project(Guid customerId, string name, ProjectPaymentType paymentType, ProjectStatus status, string notes, decimal? juniorRate, decimal? midRate, decimal? seniorRate, decimal? fixedAmount, string currentUser, bool isDefault = false)
         {
             WorkLogDomainValidation.Required(customerId, nameof(CustomerId));
             WorkLogDomainValidation.Required(name, nameof(Name));
@@ -35,6 +36,7 @@ namespace SC.WorkLog.Domain.AggregateRoots
             Status = status;
             Notes = notes;
             Active = status != ProjectStatus.Closed;
+            IsDefault = isDefault;
             JuniorRate = juniorRate;
             MidRate = midRate;
             SeniorRate = seniorRate;
@@ -42,7 +44,7 @@ namespace SC.WorkLog.Domain.AggregateRoots
             AuditInfo = new AuditInfo(currentUser);
         }
 
-        public void Update(Guid customerId, string name, ProjectPaymentType paymentType, ProjectStatus status, string notes, decimal? juniorRate, decimal? midRate, decimal? seniorRate, decimal? fixedAmount, string currentUser)
+        public void Update(Guid customerId, string name, ProjectPaymentType paymentType, ProjectStatus status, string notes, decimal? juniorRate, decimal? midRate, decimal? seniorRate, decimal? fixedAmount, string currentUser, bool isDefault = false)
         {
             WorkLogDomainValidation.Required(customerId, nameof(CustomerId));
             WorkLogDomainValidation.Required(name, nameof(Name));
@@ -55,6 +57,7 @@ namespace SC.WorkLog.Domain.AggregateRoots
             Status = status;
             Notes = notes;
             Active = status != ProjectStatus.Closed;
+            IsDefault = isDefault;
             JuniorRate = juniorRate;
             MidRate = midRate;
             SeniorRate = seniorRate;

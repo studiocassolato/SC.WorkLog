@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using SC.WorkLog.Domain.DomainServices;
 using SC.WorkLog.Domain.Enums;
 using SC.WorkLog.Domain.ValueObjects;
@@ -8,7 +9,6 @@ namespace SC.WorkLog.Domain.AggregateRoots
     public class WorkLogUser : AggregateRoot
     {
         public string Email { get; private set; }
-        public string CognitoSub { get; private set; }
         public WorkLogUserType UserType { get; private set; }
         public WorkLogUserRole Role { get; private set; }
         public Guid? EmployeeId { get; private set; }
@@ -20,14 +20,13 @@ namespace SC.WorkLog.Domain.AggregateRoots
         {
         }
 
-        public WorkLogUser(string email, string cognitoSub, WorkLogUserType userType, WorkLogUserRole role, Guid? employeeId, Guid? customerId, string displayName, string currentUser)
+        public WorkLogUser(string email, WorkLogUserType userType, WorkLogUserRole role, Guid? employeeId, Guid? customerId, string displayName, string currentUser)
         {
             WorkLogDomainValidation.Required(email, nameof(Email));
             WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
             ValidateUserShape(userType, role, employeeId, customerId);
 
-            Email = email.Trim();
-            CognitoSub = cognitoSub?.Trim();
+            Email = NormalizeEmail(email);
             UserType = userType;
             Role = role;
             EmployeeId = employeeId;
@@ -37,14 +36,13 @@ namespace SC.WorkLog.Domain.AggregateRoots
             AuditInfo = new AuditInfo(currentUser);
         }
 
-        public void Update(string email, string cognitoSub, WorkLogUserType userType, WorkLogUserRole role, Guid? employeeId, Guid? customerId, string displayName, bool active, string currentUser)
+        public void Update(string email, WorkLogUserType userType, WorkLogUserRole role, Guid? employeeId, Guid? customerId, string displayName, bool active, string currentUser)
         {
             WorkLogDomainValidation.Required(email, nameof(Email));
             WorkLogDomainValidation.Required(currentUser, nameof(currentUser));
             ValidateUserShape(userType, role, employeeId, customerId);
 
-            Email = email.Trim();
-            CognitoSub = cognitoSub?.Trim();
+            Email = NormalizeEmail(email);
             UserType = userType;
             Role = role;
             EmployeeId = employeeId;
@@ -79,6 +77,11 @@ namespace SC.WorkLog.Domain.AggregateRoots
                 if (role != WorkLogUserRole.Customer)
                     throw new ArgumentException("Customer users can only have Customer role.");
             }
+        }
+
+        private static string NormalizeEmail(string email)
+        {
+            return email.Trim().ToLower(CultureInfo.InvariantCulture);
         }
     }
 }

@@ -14,13 +14,12 @@ public class WorkLogUserServiceTests
     public async Task CreateUser_WithDuplicateEmail_ThrowsArgumentException()
     {
         var context = CreateContext();
-        context.Users.Items.Add(new WorkLogUser("ada@example.com", "sub-1", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin"));
+        context.Users.Items.Add(new WorkLogUser("ada@example.com", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin"));
         var service = CreateService(context);
 
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.CreateUser(new CreateWorkLogUserRequest
         {
             Email = "ada@example.com",
-            CognitoSub = "sub-2",
             UserType = WorkLogUserType.Employee,
             Role = WorkLogUserRole.Employee,
             EmployeeId = context.Employee.Id,
@@ -31,46 +30,25 @@ public class WorkLogUserServiceTests
     }
 
     [Fact]
-    public async Task CreateUser_WithDuplicateCognitoSub_ThrowsArgumentException()
+    public async Task ResolveAuthenticatedUser_ByEmail_ReturnsUser()
     {
         var context = CreateContext();
-        context.Users.Items.Add(new WorkLogUser("ada@example.com", "same-sub", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin"));
-        var service = CreateService(context);
-
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() => service.CreateUser(new CreateWorkLogUserRequest
-        {
-            Email = "other@example.com",
-            CognitoSub = "same-sub",
-            UserType = WorkLogUserType.Employee,
-            Role = WorkLogUserRole.Employee,
-            EmployeeId = context.Employee.Id,
-            Active = true
-        }, AdminContext()));
-
-        Assert.Contains("CognitoSub must be unique", exception.Message);
-    }
-
-    [Fact]
-    public async Task ResolveAuthenticatedUser_ByCognitoSub_ReturnsUser()
-    {
-        var context = CreateContext();
-        var user = new WorkLogUser("ada@example.com", "sub-1", WorkLogUserType.Employee, WorkLogUserRole.Admin, context.Employee.Id, null, "Ada", "admin");
+        var user = new WorkLogUser("ada@example.com", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin");
         context.Users.Items.Add(user);
 
-        var resolved = await CreateService(context).ResolveAuthenticatedUser("sub-1", "wrong@example.com");
+        var resolved = await CreateService(context).ResolveAuthenticatedUser("ada@example.com");
 
         Assert.Equal(user.Id, resolved.Id);
-        Assert.Equal(WorkLogUserRole.Admin, resolved.Role);
     }
 
     [Fact]
-    public async Task ResolveAuthenticatedUser_FallsBackToEmail_ReturnsUser()
+    public async Task ResolveAuthenticatedUser_WithDifferentEmailCasing_ReturnsUser()
     {
         var context = CreateContext();
-        var user = new WorkLogUser("ada@example.com", null, WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin");
+        var user = new WorkLogUser("ada@example.com", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin");
         context.Users.Items.Add(user);
 
-        var resolved = await CreateService(context).ResolveAuthenticatedUser("unknown-sub", "ada@example.com");
+        var resolved = await CreateService(context).ResolveAuthenticatedUser("Ada@Example.com");
 
         Assert.Equal(user.Id, resolved.Id);
     }
@@ -79,11 +57,11 @@ public class WorkLogUserServiceTests
     public async Task ResolveAuthenticatedUser_InactiveUser_ThrowsArgumentException()
     {
         var context = CreateContext();
-        var user = new WorkLogUser("ada@example.com", "sub-1", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin");
-        user.Update(user.Email, user.CognitoSub, user.UserType, user.Role, user.EmployeeId, user.CustomerId, user.DisplayName, false, "admin");
+        var user = new WorkLogUser("ada@example.com", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin");
+        user.Update(user.Email, user.UserType, user.Role, user.EmployeeId, user.CustomerId, user.DisplayName, false, "admin");
         context.Users.Items.Add(user);
 
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() => CreateService(context).ResolveAuthenticatedUser("sub-1", "ada@example.com"));
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() => CreateService(context).ResolveAuthenticatedUser("ada@example.com"));
 
         Assert.Contains("not active", exception.Message);
     }
@@ -92,10 +70,10 @@ public class WorkLogUserServiceTests
     public async Task ResolveAuthenticatedUser_CustomerUser_ThrowsUnauthorizedAccessException()
     {
         var context = CreateContext();
-        var user = new WorkLogUser("customer@example.com", "sub-customer", WorkLogUserType.Customer, WorkLogUserRole.Customer, null, context.Customer.Id, "Customer", "admin");
+        var user = new WorkLogUser("customer@example.com", WorkLogUserType.Customer, WorkLogUserRole.Customer, null, context.Customer.Id, "Customer", "admin");
         context.Users.Items.Add(user);
 
-        var exception = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => CreateService(context).ResolveAuthenticatedUser("sub-customer", "customer@example.com"));
+        var exception = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => CreateService(context).ResolveAuthenticatedUser("customer@example.com"));
 
         Assert.Contains("Customer access is not enabled", exception.Message);
     }
@@ -104,10 +82,10 @@ public class WorkLogUserServiceTests
     public async Task ResolveAuthenticatedUser_RoleComesFromWorkLogUser()
     {
         var context = CreateContext();
-        var user = new WorkLogUser("ada@example.com", "sub-1", WorkLogUserType.Employee, WorkLogUserRole.Admin, context.Employee.Id, null, "Ada", "admin");
+        var user = new WorkLogUser("ada@example.com", WorkLogUserType.Employee, WorkLogUserRole.Admin, context.Employee.Id, null, "Ada", "admin");
         context.Users.Items.Add(user);
 
-        var resolved = await CreateService(context).ResolveAuthenticatedUser("sub-1", "ada@example.com");
+        var resolved = await CreateService(context).ResolveAuthenticatedUser("ada@example.com");
 
         Assert.Equal(WorkLogUserRole.Admin, resolved.Role);
     }
@@ -120,10 +98,10 @@ public class WorkLogUserServiceTests
         var otherCustomer = new Customer("Other", null, "Other", "other@example.com", null, "admin");
         context.Employees.Items.Add(otherEmployee);
         context.Customers.Items.Add(otherCustomer);
-        var employeeUser = new WorkLogUser("ada@example.com", "sub-1", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin");
-        var otherEmployeeUser = new WorkLogUser("alan@example.com", "sub-2", WorkLogUserType.Employee, WorkLogUserRole.Admin, otherEmployee.Id, null, "Alan", "admin");
-        var customerUser = new WorkLogUser("grace@example.com", "sub-3", WorkLogUserType.Customer, WorkLogUserRole.Customer, null, context.Customer.Id, "Grace", "admin");
-        var otherCustomerUser = new WorkLogUser("other@example.com", "sub-4", WorkLogUserType.Customer, WorkLogUserRole.Customer, null, otherCustomer.Id, "Other", "admin");
+        var employeeUser = new WorkLogUser("ada@example.com", WorkLogUserType.Employee, WorkLogUserRole.Employee, context.Employee.Id, null, "Ada", "admin");
+        var otherEmployeeUser = new WorkLogUser("alan@example.com", WorkLogUserType.Employee, WorkLogUserRole.Admin, otherEmployee.Id, null, "Alan", "admin");
+        var customerUser = new WorkLogUser("grace@example.com", WorkLogUserType.Customer, WorkLogUserRole.Customer, null, context.Customer.Id, "Grace", "admin");
+        var otherCustomerUser = new WorkLogUser("other@example.com", WorkLogUserType.Customer, WorkLogUserRole.Customer, null, otherCustomer.Id, "Other", "admin");
         context.Users.Items.AddRange(new[] { employeeUser, otherEmployeeUser, customerUser, otherCustomerUser });
         var service = CreateService(context);
 
